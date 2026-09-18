@@ -65,6 +65,7 @@ function renderSaleScreen(container) {
     </div>
 
     <div class="section-title">المنتجات المضافة (${saleState.items.length})</div>
+    ${saleState.items.length ? `<div class="hint" style="margin-top:-6px;margin-bottom:8px;">💡 تقدر تكتب الوزن، أو تكتب مباشرة السعر الإجمالي من الميزان وبيحسب الوزن تلقائيًا</div>` : ''}
     <div class="card" id="items-card" style="padding:6px 10px;">
       ${renderItemsList()}
     </div>
@@ -103,21 +104,20 @@ function itemsTotal(items) {
 function renderItemsList() {
   if (!saleState.items.length) return emptyState('🛒', 'لم تُضف منتجات بعد', 'اختر منتجًا من الأعلى للبدء');
   return saleState.items.map((it, idx) => `
-    <div class="sale-item-row" data-idx="${idx}">
-      <div style="flex:1;">
-        <div class="prod-name">${escapeHtml(it.product_name)}</div>
-        <div style="display:flex;gap:6px;margin-top:6px;align-items:center;">
-          <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${it.quantity}" step="0.1" min="0.01" style="width:70px;padding:7px 8px;font-size:13px;">
-          <span class="prod-meta">${it.unit} ×</span>
-          <input type="number" inputmode="decimal" class="item-price" data-idx="${idx}" value="${fromCents(toCents(it.selling_price))}" step="0.5" min="0" style="width:75px;padding:7px 8px;font-size:13px;">
-          <span class="prod-meta">₪</span>
-        </div>
-      </div>
-      <div style="text-align:left;">
-        <div class="prod-total">${formatMoney(Math.round(toCents(it.selling_price) * it.quantity))}</div>
+    <div class="sale-item-row" data-idx="${idx}" style="flex-direction:column;align-items:stretch;gap:8px;">
+      <div style="display:flex;align-items:center;">
+        <div class="prod-name" style="flex:1;">${escapeHtml(it.product_name)}</div>
         <button class="remove-btn" data-remove="${idx}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
         </button>
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${it.quantity}" step="0.1" min="0.01" style="width:56px;padding:7px 6px;font-size:13px;" title="الكمية">
+        <span class="prod-meta">${it.unit} ×</span>
+        <input type="number" inputmode="decimal" class="item-price" data-idx="${idx}" value="${fromCents(toCents(it.selling_price))}" step="0.5" min="0" style="width:60px;padding:7px 6px;font-size:13px;" title="سعر الكيلو">
+        <span class="prod-meta">₪ =</span>
+        <input type="number" inputmode="decimal" class="item-total" data-idx="${idx}" value="${fromCents(Math.round(toCents(it.selling_price) * it.quantity))}" step="0.5" min="0" style="width:68px;padding:7px 6px;font-size:13px;font-weight:700;color:var(--primary-dark);" title="الإجمالي من الميزان">
+        <span class="prod-meta">₪</span>
       </div>
     </div>`).join('');
 }
@@ -142,16 +142,37 @@ function bindItemInputs(container) {
     saleState.items[idx].selling_price = parseFloat(inp.value) || 0;
     updateRowTotal(container, idx);
   });
+  container.querySelectorAll('.item-total').forEach(inp => inp.oninput = () => {
+    const idx = +inp.dataset.idx;
+    updateRowQuantityFromTotal(container, idx, parseFloat(inp.value) || 0);
+  });
   container.querySelectorAll('[data-remove]').forEach(btn => btn.onclick = () => {
     saleState.items.splice(+btn.dataset.remove, 1);
     refreshItemsAndTotals(container);
   });
 }
 
+// عند تعديل الكمية أو السعر: نعيد حساب الإجمالي (Total = Qty × Price)
 function updateRowTotal(container, idx) {
   const row = container.querySelector(`.sale-item-row[data-idx="${idx}"]`);
   const it = saleState.items[idx];
-  row.querySelector('.prod-total').textContent = formatMoney(Math.round(toCents(it.selling_price) * it.quantity));
+  const totalCents = Math.round(toCents(it.selling_price) * it.quantity);
+  row.querySelector('.item-total').value = fromCents(totalCents);
+  updateGrandTotal(container);
+}
+
+// عند تعديل الإجمالي (السعر من الميزان): نعيد حساب الكمية بالعكس = Total ÷ Price
+function updateRowQuantityFromTotal(container, idx, totalValue) {
+  const row = container.querySelector(`.sale-item-row[data-idx="${idx}"]`);
+  const it = saleState.items[idx];
+  if (it.selling_price > 0) {
+    it.quantity = Math.round((totalValue / it.selling_price) * 1000) / 1000;
+    row.querySelector('.item-qty').value = it.quantity;
+  }
+  updateGrandTotal(container);
+}
+
+function updateGrandTotal(container) {
   const total = itemsTotal(saleState.items);
   container.querySelector('.totals-box .grand span:last-child').textContent = formatMoney(total);
   syncSingleMethodAmounts();

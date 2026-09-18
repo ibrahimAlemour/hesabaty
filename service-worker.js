@@ -1,6 +1,6 @@
 // Service Worker: يجعل التطبيق يعمل بالكامل بدون إنترنت (Offline-first)
-const CACHE_NAME = 'hesabaty-cache-v1';
-const RUNTIME_CACHE = 'hesabaty-runtime-v1';
+const CACHE_NAME = 'hesabaty-cache-v2';
+const RUNTIME_CACHE = 'hesabaty-runtime-v2';
 
 const APP_SHELL = [
   './',
@@ -58,12 +58,14 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   if (url.origin === self.location.origin) {
+    // Network-first لملفات التطبيق نفسها: يضمن ظهور أي تحديث فورًا عند وجود إنترنت
+    // مع الاحتفاظ بنسخة محلية تُستخدم فقط عند انقطاع الإنترنت (Offline fallback)
     event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request).then((response) => {
+      fetch(request).then((response) => {
         const clone = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
         return response;
-      }).catch(() => caches.match('./index.html')))
+      }).catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
     );
     return;
   }

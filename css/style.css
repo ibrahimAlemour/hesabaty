@@ -242,9 +242,10 @@ table.simple-table th { color: var(--text-muted); font-weight: 700; font-size: 1
 /* Product picker items in sale */
 .sale-item-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .sale-item-row:last-child { border-bottom: none; }
-.sale-item-row .prod-name { font-weight: 700; font-size: 14px; flex: 1; }
-.sale-item-row .prod-meta { font-size: 12px; color: var(--text-muted); }
+.sale-item-row .prod-name { font-weight: 700; font-size: 15px; flex: 1; }
+.sale-item-row .prod-meta { font-size: 13.5px; color: var(--text-muted); font-weight: 600; }
 .sale-item-row .prod-total { font-weight: 800; font-size: 14px; }
+.sale-item-row input::placeholder { font-size: 13px; color: var(--text-muted); opacity: .7; }
 .sale-item-row .remove-btn { color: var(--danger); background: none; border: none; cursor: pointer; padding: 4px; }
 
 .totals-box { background: var(--primary-light); border-radius: var(--radius-sm); padding: 12px 14px; margin: 12px 0; }

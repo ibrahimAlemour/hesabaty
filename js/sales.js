@@ -98,12 +98,15 @@ function categoryEmoji(catId) {
 }
 
 function itemsTotal(items) {
-  return items.reduce((s, it) => s + Math.round(toCents(it.selling_price) * it.quantity), 0);
+  return items.reduce((s, it) => s + Math.round(toCents(it.selling_price) * (parseFloat(it.quantity) || 0)), 0);
 }
 
 function renderItemsList() {
   if (!saleState.items.length) return emptyState('🛒', 'لم تُضف منتجات بعد', 'اختر منتجًا من الأعلى للبدء');
-  return saleState.items.map((it, idx) => `
+  return saleState.items.map((it, idx) => {
+    const hasQty = it.quantity !== '' && it.quantity != null;
+    const totalValue = hasQty ? fromCents(Math.round(toCents(it.selling_price) * it.quantity)) : '';
+    return `
     <div class="sale-item-row" data-idx="${idx}" style="flex-direction:column;align-items:stretch;gap:8px;">
       <div style="display:flex;align-items:center;">
         <div class="prod-name" style="flex:1;">${escapeHtml(it.product_name)}</div>
@@ -111,15 +114,16 @@ function renderItemsList() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
         </button>
       </div>
-      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
-        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${it.quantity}" step="0.1" min="0.01" style="width:56px;padding:7px 6px;font-size:13px;" title="الكمية">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${it.quantity}" placeholder="الوزن" step="0.1" min="0.01" style="width:78px;padding:11px 8px;font-size:15.5px;" title="الكمية">
         <span class="prod-meta">${it.unit} ×</span>
-        <input type="number" inputmode="decimal" class="item-price" data-idx="${idx}" value="${fromCents(toCents(it.selling_price))}" step="0.5" min="0" style="width:60px;padding:7px 6px;font-size:13px;" title="سعر الكيلو">
+        <input type="number" inputmode="decimal" class="item-price" data-idx="${idx}" value="${fromCents(toCents(it.selling_price))}" step="0.5" min="0" style="width:78px;padding:11px 8px;font-size:15.5px;" title="سعر الكيلو">
         <span class="prod-meta">₪ =</span>
-        <input type="number" inputmode="decimal" class="item-total" data-idx="${idx}" value="${fromCents(Math.round(toCents(it.selling_price) * it.quantity))}" step="0.5" min="0" style="width:68px;padding:7px 6px;font-size:13px;font-weight:700;color:var(--primary-dark);" title="الإجمالي من الميزان">
+        <input type="number" inputmode="decimal" class="item-total" data-idx="${idx}" value="${totalValue}" placeholder="الإجمالي" step="0.5" min="0" style="width:88px;padding:11px 8px;font-size:15.5px;font-weight:700;color:var(--primary-dark);" title="الإجمالي من الميزان">
         <span class="prod-meta">₪</span>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function refreshItemsAndTotals(container) {
@@ -211,7 +215,7 @@ function bindSaleScreen(container) {
 function addItemFromProduct(container, product) {
   if (!product) return;
   saleState.items.push({
-    product_id: product.id, product_name: product.name, quantity: 1, unit: product.unit,
+    product_id: product.id, product_name: product.name, quantity: '', unit: product.unit,
     cost_price: fromCents(product.cost_price), selling_price: fromCents(product.selling_price)
   });
   refreshItemsAndTotals(container);
@@ -271,7 +275,7 @@ function openManualProductSheet(container) {
     const cost = parseFloat(overlay.querySelector('#mp-cost').value) || 0;
     closeSheet();
     saleState.items.push({
-      product_id: null, product_name: name, quantity: 1, unit: overlay.querySelector('#mp-unit').value,
+      product_id: null, product_name: name, quantity: '', unit: overlay.querySelector('#mp-unit').value,
       cost_price: cost, selling_price: price
     });
     refreshItemsAndTotals(container);
@@ -393,6 +397,7 @@ function openSplitPaymentSheet(container) {
 async function completeSale(container) {
   const btn = container.querySelector('#complete-sale-btn');
   if (!saleState.items.length) return toastError('أضف منتجًا واحدًا على الأقل');
+  if (saleState.items.some(it => !(parseFloat(it.quantity) > 0))) return toastError('أدخل الوزن أو الإجمالي لكل منتج قبل إتمام البيع');
   const total = itemsTotal(saleState.items);
   if (saleState.payMode === 'single') syncSingleMethodAmounts();
   const { cash, transfer, debt } = saleState.split;

@@ -1,4 +1,6 @@
 /* Responsive tweaks for tablets/desktop */
+.desktop-sidebar { display: none; }
+
 @media (min-width: 640px) {
   .quick-grid { grid-template-columns: repeat(4, 1fr); }
   .stat-grid { grid-template-columns: repeat(4, 1fr); }

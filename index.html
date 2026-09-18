@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>حساباتي - نظام كاشير وإدارة محل</title>
+<meta name="description" content="تطبيق كاشير بسيط لأصحاب المحلات الصغيرة: مبيعات، ديون، تحويلات، تقارير وصندوق">
+<meta name="theme-color" content="#0d9488">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="حساباتي">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/responsive.css">
+</head>
+<body class="theme-auto">
+
+<div id="setup-root"></div>
+<div id="login-root"></div>
+
+<div id="app-shell" class="app-shell" style="display:none;">
+  <aside class="desktop-sidebar" id="desktop-sidebar">
+    <div class="brand">🧾 حساباتي</div>
+    <div class="sidebar-cta">
+      <button class="big-cta" style="margin:0;" onclick="window.location.hash='#/sale/new'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        بيع جديد
+      </button>
+    </div>
+    <nav id="desktop-sidebar-links"></nav>
+  </aside>
+
+  <div class="main-col">
+    <header class="app-header">
+      <div class="header-title-wrap" style="display:flex;align-items:center;gap:6px;">
+        <button id="back-btn" class="back-btn" style="display:none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <span class="header-title" id="header-title">حساباتي</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="sync-status-btn" title="حالة المزامنة">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6"/><path d="M5.5 9a7 7 0 0112-3.5M18.5 15a7 7 0 01-12 3.5"/></svg>
+        </button>
+      </div>
+    </header>
+    <main id="app-content"></main>
+  </div>
+</div>
+
+<nav class="bottom-nav" id="bottom-nav"></nav>
+
+<script type="module" src="js/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => console.error('SW registration failed', err));
+  });
+}
+</script>
+</body>
+</html>

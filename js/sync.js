@@ -53,6 +53,10 @@ async function ensureRemoteClient() {
     if (!settings || settings.backendMode !== 'supabase' || !settings.supabaseUrl || !settings.supabaseAnonKey) return false;
     await remoteDb.loadSupabaseScript();
     await remoteDb.initSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
+    // نستعيد الجلسة المحفوظة صراحة وننتظرها قبل أي طلب: عميل سوبابيس المُنشأ حديثًا يستعيد الجلسة من
+    // التخزين المحلي بشكل غير متزامن بالخلفية، فلو أرسلنا طلب كتابة فورًا بدون انتظار هذا قد يُرسل
+    // بدون هوية المستخدم (فقط anon key) فيُرفض بسياسة RLS رغم إنه فعليًا مسجّل دخوله
+    await remoteDb.getSession();
     return !!remoteDb.getClient();
   } catch (e) {
     return false;

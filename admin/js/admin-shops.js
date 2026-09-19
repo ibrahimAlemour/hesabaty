@@ -55,41 +55,70 @@ function openCreateShopSheet(container) {
     <div class="form-group"><label>اسم صاحب المحل</label><input type="text" id="ns-owner" placeholder="الاسم"></div>
     <div class="form-group"><label>رقم الهاتف</label><input type="tel" id="ns-phone" placeholder="05xxxxxxxx"></div>
     <div class="form-group"><label>العنوان (اختياري)</label><input type="text" id="ns-address"></div>
+    <div class="divider-label">حساب دخول صاحب المحل</div>
+    <div class="form-group"><label>البريد الإلكتروني</label><input type="email" id="ns-email" placeholder="owner@example.com"></div>
+    <div class="form-group">
+      <label>كلمة المرور</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="ns-password" placeholder="6 أحرف على الأقل" style="flex:1;">
+        <button type="button" class="btn btn-secondary btn-sm" id="ns-gen-pass">توليد</button>
+      </div>
+    </div>
     <div class="divider-label">تفاصيل الاشتراك الأول</div>
     <div class="form-group"><label>قيمة الاشتراك الشهري (₪)</label><input type="number" id="ns-price" step="0.5" min="0" placeholder="100"></div>
     <div class="form-group"><label>عدد الأشهر</label><input type="number" id="ns-months" value="1" min="1" step="1"></div>
-    <button class="btn btn-primary btn-block" id="ns-save">إنشاء المحل</button>
+    <button class="btn btn-primary btn-block" id="ns-save">إنشاء المحل وحساب الدخول</button>
   `, { onOpen: (el) => el.querySelector('#ns-name').focus() });
+
+  overlay.querySelector('#ns-gen-pass').onclick = () => {
+    const pass = Math.random().toString(36).slice(-5) + Math.floor(10 + Math.random() * 89);
+    overlay.querySelector('#ns-password').value = pass;
+  };
 
   overlay.querySelector('#ns-save').onclick = async () => {
     const btn = overlay.querySelector('#ns-save');
     const name = overlay.querySelector('#ns-name').value.trim();
+    const ownerEmail = overlay.querySelector('#ns-email').value.trim();
+    const ownerPassword = overlay.querySelector('#ns-password').value;
     if (!name) return toastError('أدخل اسم المحل');
+    if (!ownerEmail) return toastError('أدخل بريد صاحب المحل');
+    if (!ownerPassword || ownerPassword.length < 6) return toastError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
     const price = parseFloat(overlay.querySelector('#ns-price').value) || 0;
     const months = parseInt(overlay.querySelector('#ns-months').value) || 1;
     setLoading(btn, true, 'جاري الإنشاء...');
     try {
       const admin = await getCurrentAdmin();
-      const shop = await adb.createShop({
-        name, ownerName: overlay.querySelector('#ns-owner').value.trim(),
+      const result = await adb.createShopWithLogin({
+        shopName: name, ownerName: overlay.querySelector('#ns-owner').value.trim(),
         phone: overlay.querySelector('#ns-phone').value.trim(), address: overlay.querySelector('#ns-address').value.trim(),
-        status: 'active'
+        monthlyPrice: price, months, ownerEmail, ownerPassword
       });
-      const start = new Date();
-      const end = new Date(); end.setMonth(end.getMonth() + months);
-      await adb.addSubscriptionPeriod({
-        shopId: shop.id, monthlyPrice: toCents(price),
-        startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10)
-      });
-      await adb.logAdminAction(admin, 'create_shop', shop.id, { name, price, months });
+      await adb.logAdminAction(admin, 'create_shop', result.shop.id, { name, price, months, ownerEmail });
       closeSheet();
-      toastSuccess('تم إنشاء المحل. الخطوة التالية: أنشئ حساب الدخول له من لوحة Supabase (Authentication) واربطه بجدول profiles بهذا الـ shop_id.');
-      window.location.hash = `#/shops/${shop.id}`;
+      openCreatedShopSuccessSheet(container, result);
     } catch (err) {
       console.error(err);
-      toastError('حدث خطأ أثناء إنشاء المحل. حاول مرة أخرى.');
+      toastError(err.message || 'حدث خطأ أثناء إنشاء المحل. حاول مرة أخرى.');
       setLoading(btn, false);
     }
+  };
+}
+
+function openCreatedShopSuccessSheet(container, result) {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>✅ تم إنشاء المحل بنجاح</h3></div>
+    <p style="font-size:13.5px;color:var(--text-muted);margin-bottom:14px;">شارك بيانات الدخول التالية مع صاحب المحل (تظهر مرة واحدة فقط هنا):</p>
+    <div class="card" style="background:var(--primary-light);">
+      <div style="font-size:13px;color:var(--text-muted);">البريد الإلكتروني</div>
+      <div style="font-weight:800;font-size:15px;margin-bottom:10px;">${escapeHtml(result.ownerEmail)}</div>
+      <div style="font-size:13px;color:var(--text-muted);">كلمة المرور</div>
+      <div style="font-weight:800;font-size:15px;">${escapeHtml(result.ownerPassword)}</div>
+    </div>
+    <button class="btn btn-primary btn-block" id="cs-done" style="margin-top:14px;">تم</button>
+  `, { closeOnBackdrop: false });
+  overlay.querySelector('#cs-done').onclick = () => {
+    closeSheet();
+    window.location.hash = `#/shops/${result.shop.id}`;
   };
 }
 

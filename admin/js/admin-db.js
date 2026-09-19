@@ -38,6 +38,21 @@ export async function createShop({ name, ownerName, phone, address, status }) {
   return data;
 }
 
+// إنشاء محل + حساب دخول صاحبه بضغطة واحدة، عبر Worker خادمي آمن يحمل مفتاح service_role
+// (لا يمكن فعل هذا من المتصفح مباشرة لأسباب أمنية - راجع worker.js)
+export async function createShopWithLogin(payload) {
+  const session = await getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/admin/create-shop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل إنشاء المحل');
+  return data;
+}
+
 export async function updateShop(id, patch) {
   const { data, error } = await client().from('shops').update({ ...patch, updated_at: nowISO() }).eq('id', id).select().single();
   if (error) throw error;

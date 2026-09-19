@@ -1,7 +1,7 @@
 // شاشة تسجيل الدخول
-import { getSettings } from './database.js';
+import { getSettings, updateSettings } from './database.js';
 import { localSignIn, pinSignIn, supabaseSignIn } from './auth.js';
-import { toastError, setLoading, openSheet, closeSheet } from './ui.js';
+import { toastError, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { escapeHtml } from './utils.js';
 
 export async function renderLogin(container) {
@@ -33,6 +33,7 @@ export async function renderLogin(container) {
       <div class="quick-grid">
         ${cashiers.map(c => `<div class="quick-btn" data-cashier="${c.id}"><span class="emoji">👤</span>${escapeHtml(c.name)}</div>`).join('')}
       </div>` : ''}
+      ${isSupabase ? `<button class="link-btn" id="use-local-btn" style="display:block;margin:18px auto 0;">إعداد محل جديد محليًا بدون إنترنت</button>` : ''}
     </div>`;
 
   container.querySelector('#l-submit').onclick = async () => {
@@ -57,6 +58,18 @@ export async function renderLogin(container) {
       promptPin(cashier);
     };
   });
+
+  const useLocalBtn = container.querySelector('#use-local-btn');
+  if (useLocalBtn) useLocalBtn.onclick = async () => {
+    const ok = await confirmDialog({
+      title: 'إعداد محلي بدون إنترنت',
+      message: 'هذا لإنشاء محل تجريبي محلي على هذا الجهاز فقط، منفصل عن نظام الاشتراكات. تقدر ترجع للدخول بحساب Supabase لاحقًا من الإعدادات.',
+      confirmLabel: 'متابعة', danger: false
+    });
+    if (!ok) return;
+    await updateSettings({ backendMode: 'local', setupCompleted: false, supabaseUrl: '', supabaseAnonKey: '' });
+    window.location.reload();
+  };
 }
 
 function promptPin(cashier) {

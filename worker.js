@@ -111,6 +111,15 @@ async function handleCreateShop(request, env) {
     body: JSON.stringify({ id: newUser.id, name: ownerName || String(shopName).trim(), role: 'owner', shop_id: shop.id })
   });
 
+  // 5) تهيئة إعدادات المحل (اسم المحل، الهاتف...) حتى تظهر صحيحة فور أول تسجيل دخول بدل القيم الافتراضية
+  await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+    method: 'POST', headers: svcHeaders,
+    body: JSON.stringify({
+      id: shop.id, shop_id: shop.id, shop_name: String(shopName).trim(), phone: phone || '', address: address || '',
+      currency: '₪', timezone: 'Asia/Gaza'
+    })
+  });
+
   return json({ shop, ownerEmail, ownerPassword });
 }
 

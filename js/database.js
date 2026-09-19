@@ -5,11 +5,15 @@ import * as localDb from './db-indexeddb.js';
 import * as remoteDb from './db-supabase.js';
 import * as sync from './sync.js';
 import { uuid, nowISO, toCents, startOfDay, endOfDay } from './utils.js';
+import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
 
 const SETTINGS_ID = 'app';
 let settingsCache = null;
 
 // ---------- الإعدادات ----------
+// الافتراضي الآن هو وضع SaaS (سوبابيس): المحلات تُنشأ مركزيًا من لوحة المدير، فجهاز جديد
+// يفتح التطبيق لأول مرة يجب أن يرى شاشة تسجيل دخول مباشرة، لا معالج "أنشئ محلك بنفسك" المحلي.
+// خيار الإعداد المحلي (بدون إنترنت/بدون SaaS) يبقى متاحًا كبديل اختياري من شاشة الدخول.
 const DEFAULT_SETTINGS = {
   id: SETTINGS_ID,
   shopName: 'محلي',
@@ -18,13 +22,13 @@ const DEFAULT_SETTINGS = {
   currency: '₪',
   timezone: 'Asia/Gaza',
   theme: 'auto',
-  backendMode: 'local', // local | supabase
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  backendMode: 'supabase', // local | supabase
+  supabaseUrl: SAAS_SUPABASE_URL,
+  supabaseAnonKey: SAAS_SUPABASE_ANON_KEY,
   lastInvoiceNumber: 0,
   openingCashBalance: 0, // بالسنت
   openingCashDate: nowISO(),
-  setupCompleted: false,
+  setupCompleted: true,
   seedLoaded: false,
   currentUser: null, // { id, name, role }
   users: [], // حسابات محلية: { id, name, email, passwordHash, role }

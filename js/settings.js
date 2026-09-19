@@ -171,8 +171,9 @@ function bind(container, settings) {
 
 async function testSupabaseConnection(container) {
   const btn = container.querySelector('#st-sb-test');
-  const url = container.querySelector('#st-sb-url').value.trim();
   const key = container.querySelector('#st-sb-key').value.trim();
+  let url = container.querySelector('#st-sb-url').value.trim();
+  url = url.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
   if (!url || !key) return toastError('أدخل رابط ومفتاح Supabase');
   setLoading(btn, true, 'جاري الاختبار...');
   try {
@@ -183,7 +184,8 @@ async function testSupabaseConnection(container) {
     toastSuccess('تم الاتصال بنجاح! سجّل الخروج الآن وادخل بحساب Supabase الذي أنشأته لبدء المزامنة');
     renderSettings(container);
   } catch (err) {
-    toastError('فشل الاتصال: تحقق من الرابط والمفتاح، أو أن الجداول غير منشأة بعد.');
+    console.error('Supabase connection test failed', err);
+    toastError(`فشل الاتصال: ${err.message || 'تحقق من الرابط والمفتاح'}`);
     setLoading(btn, false);
   }
 }

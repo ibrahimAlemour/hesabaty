@@ -84,16 +84,18 @@ export async function getByIndex(storeName, column, value) {
   return data || [];
 }
 
-// نتحقق من صحة الرابط والمفتاح عبر جذر REST API مباشرة (بدون المرور بجداول محمية بـ RLS تحتاج تسجيل دخول)
+// نتحقق من صحة الرابط والمفتاح عبر عميل supabase-js نفسه (يضبط الترويسات الصحيحة تلقائيًا)
+// نستعلم جدول categories: لو رجع خطأ "صلاحيات" (RLS) فهذا يعني أن الاتصال سليم والجداول موجودة، فقط غير مسجّل دخول بعد - وهذا متوقع وطبيعي هنا
 export async function testConnection(config) {
   try {
     if (!isSupabaseConfigured(config)) throw new Error('أدخل الرابط والمفتاح');
-    await initSupabaseClient(config);
-    const res = await fetch(`${config.url.replace(/\/$/, '')}/rest/v1/`, {
-      headers: { apikey: config.anonKey }
-    });
-    if (res.status === 401 || res.status === 404) throw new Error('الرابط أو المفتاح غير صحيح');
-    if (!res.ok && res.status !== 200) throw new Error(`تعذر الوصول للخادم (${res.status})`);
+    const client = await initSupabaseClient(config);
+    const { error } = await client.from('categories').select('id').limit(1);
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      const isRlsBlock = error.code === '42501' || msg.includes('permission denied') || msg.includes('rls') || msg.includes('row-level security');
+      if (!isRlsBlock) throw new Error(error.message || 'تعذر الاتصال بقاعدة البيانات');
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e.message || String(e) };

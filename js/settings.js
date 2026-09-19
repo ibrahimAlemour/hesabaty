@@ -70,11 +70,13 @@ export async function renderSettings(container) {
     </div>
 
     <div class="card">
-      <div class="section-title" style="margin-top:0;">اتصال Supabase</div>
+      <div class="section-title" style="margin-top:0;">${settings.backendMode === 'supabase' ? 'حالة الاتصال والمزامنة' : 'اتصال Supabase'}</div>
+      ${settings.backendMode === 'supabase' ? '' : `
       <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">اختياري. اتركه فارغًا للعمل محليًا بدون إنترنت.</p>
       <div class="form-group"><label>Supabase URL</label><input type="text" id="st-sb-url" value="${escapeHtml(settings.supabaseUrl || SAAS_SUPABASE_URL || '')}" placeholder="https://xxxx.supabase.co"></div>
       <div class="form-group"><label>Supabase Anon Key</label><input type="text" id="st-sb-key" value="${escapeHtml(settings.supabaseAnonKey || SAAS_SUPABASE_ANON_KEY || '')}" placeholder="anon key العلني فقط"></div>
       <button class="btn btn-primary btn-block" id="st-sb-test">اختبار الاتصال والتفعيل</button>
+      `}
       <div style="font-size:13px;margin-top:10px;">
         حالة المزامنة: <b>${settings.backendMode === 'supabase' ? (navigator.onLine ? 'متصل' : 'غير متصل - وضع محلي') : 'محلي فقط'}</b>
         ${pendingSync ? ` - عمليات معلقة: <b style="color:var(--danger);">${pendingSync}</b>` : ''}

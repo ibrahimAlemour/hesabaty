@@ -322,6 +322,14 @@ alter table profiles add constraint profiles_shop_id_fkey foreign key (shop_id) 
 alter table admin_audit_log drop constraint if exists admin_audit_log_target_shop_id_fkey;
 alter table admin_audit_log add constraint admin_audit_log_target_shop_id_fkey foreign key (target_shop_id) references shops(id) on delete set null;
 
+-- ---------- 9) رقم الفاتورة: تفرّد لكل محل بدل تفرّد عام على الجدول كله ----------
+-- كل محل يرقّم فواتيره محليًا من 1 (INV-000001...) بشكل مستقل، فحتمًا سيتكرر نفس الرقم بين محلات مختلفة
+-- بما إن جدول sales صار مشتركًا بين كل المحلات (متعدد المستأجرين)، القيد القديم unique(invoice_number)
+-- كان يرفض أي فاتورة برقم اتخذه محل آخر من قبل - نستبدله بقيد يفرض التفرّد فقط ضمن نفس المحل
+
+alter table sales drop constraint if exists sales_invoice_number_key;
+alter table sales add constraint sales_invoice_number_shop_unique unique (shop_id, invoice_number);
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

@@ -1,7 +1,7 @@
 // نقطة الدخول: التوجيه (Router) وهيكل الصفحة العام
 import { getSettings, updateSettings, pullFromRemote } from './database.js';
 import { isLoggedIn, getCurrentUser, refreshShopStatus, signOut } from './auth.js';
-import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus } from './sync.js';
+import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus, getPendingCount } from './sync.js';
 import * as remoteDb from './db-supabase.js';
 import { toastError } from './ui.js';
 import { renderSetupWizard } from './setup.js';
@@ -186,12 +186,20 @@ const SYNC_ICON_TITLES = {
   synced: 'متصل ومتزامن بالكامل'
 };
 
-function applySyncIconStatus(status) {
+async function applySyncIconStatus(status) {
   const btn = document.getElementById('sync-status-btn');
   if (!btn) return;
   btn.classList.remove('sync-offline', 'sync-pending', 'sync-syncing', 'sync-synced');
   btn.classList.add(`sync-${status}`);
-  btn.title = SYNC_ICON_TITLES[status] || '';
+
+  const pending = await getPendingCount();
+  const badge = document.getElementById('sync-pending-badge');
+  if (badge) {
+    if (pending > 0) { badge.textContent = pending > 99 ? '99+' : String(pending); badge.style.display = ''; }
+    else badge.style.display = 'none';
+  }
+  const suffix = pending > 0 ? ` (${pending} عملية بانتظار الرفع)` : '';
+  btn.title = (SYNC_ICON_TITLES[status] || '') + suffix;
 }
 
 async function initSyncIndicator() {

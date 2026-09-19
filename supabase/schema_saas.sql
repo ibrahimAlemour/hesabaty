@@ -317,6 +317,11 @@ end $$;
 alter table profiles drop constraint if exists profiles_shop_id_fkey;
 alter table profiles add constraint profiles_shop_id_fkey foreign key (shop_id) references shops(id) on delete cascade;
 
+-- admin_audit_log استثناء: نريد الاحتفاظ بسجل التدقيق حتى بعد حذف المحل (كدليل أنه كان موجودًا وحُذف)
+-- لذلك نفرغ الإشارة فقط (SET NULL) بدل حذف صفوف السجل نفسها
+alter table admin_audit_log drop constraint if exists admin_audit_log_target_shop_id_fkey;
+alter table admin_audit_log add constraint admin_audit_log_target_shop_id_fkey foreign key (target_shop_id) references shops(id) on delete set null;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

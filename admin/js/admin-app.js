@@ -6,6 +6,7 @@ import { renderAdminDashboard } from './admin-dashboard.js';
 import { renderShopsList, renderShopDetail } from './admin-shops.js';
 import { renderAdminSettings } from './admin-settings.js';
 import { toastError } from '../../js/ui.js';
+import '../../js/pwa-install.js';
 
 const appContent = document.getElementById('app-content');
 const headerTitle = document.getElementById('header-title');

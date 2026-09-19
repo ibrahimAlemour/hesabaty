@@ -3,6 +3,7 @@ import * as adb from './admin-db.js';
 import { getCurrentAdmin, adminSignOut } from './admin-auth.js';
 import { formatDateTime, escapeHtml } from './admin-utils.js';
 import { toastError, toastSuccess, setLoading, confirmDialog, emptyState } from '../../js/ui.js';
+import { wireInstallButton, showIOSInstallInstructions } from '../../js/pwa-install.js';
 
 export async function renderAdminSettings(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
@@ -16,6 +17,11 @@ export async function renderAdminSettings(container) {
         <div class="info"><div class="title">${escapeHtml(admin ? admin.name : '')}</div><div class="subtitle">مدير عام</div></div>
       </div>
       <button class="btn btn-secondary btn-block" id="st-logout" style="margin-top:10px;">تسجيل الخروج</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">تثبيت التطبيق</div>
+      <button class="btn btn-outline btn-block" id="pwa-install-btn" style="display:none;">📲 تثبيت اللوحة على الجهاز</button>
     </div>
 
     <div class="card">
@@ -48,6 +54,8 @@ export async function renderAdminSettings(container) {
     await adminSignOut();
     window.location.reload();
   };
+
+  wireInstallButton(container.querySelector('#pwa-install-btn'), { onIOSInstructions: showIOSInstallInstructions });
 
   container.querySelector('#st-save').onclick = async () => {
     const btn = container.querySelector('#st-save');

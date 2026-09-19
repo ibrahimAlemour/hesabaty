@@ -6,6 +6,7 @@ import { getPendingCount, flushQueue } from './sync.js';
 import { escapeHtml } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
+import { wireInstallButton, showIOSInstallInstructions } from './pwa-install.js';
 
 export async function renderSettings(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
@@ -13,6 +14,12 @@ export async function renderSettings(container) {
   const canManage = canDelete(user);
 
   container.innerHTML = `
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">تثبيت التطبيق</div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">ثبّت التطبيق على شاشتك الرئيسية ليفتح ويعمل كتطبيق مستقل.</p>
+      <button class="btn btn-outline btn-block" id="pwa-install-btn" style="display:none;">📲 تثبيت التطبيق على الجهاز</button>
+    </div>
+
     <div class="card">
       <div class="section-title" style="margin-top:0;">بيانات المحل</div>
       <div class="form-group"><label>اسم المحل</label><input type="text" id="st-shop-name" value="${escapeHtml(settings.shopName)}"></div>
@@ -84,6 +91,8 @@ export async function renderSettings(container) {
 }
 
 function bind(container, settings) {
+  wireInstallButton(container.querySelector('#pwa-install-btn'), { onIOSInstructions: showIOSInstallInstructions });
+
   container.querySelector('#st-save-shop').onclick = async () => {
     const btn = container.querySelector('#st-save-shop');
     setLoading(btn, true, 'جاري الحفظ...');

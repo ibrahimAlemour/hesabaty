@@ -17,6 +17,7 @@ import { renderReports } from './reports.js';
 import { renderSettings, applyTheme } from './settings.js';
 import { renderInvoice } from './invoice.js';
 import { renderDebts } from './debts.js';
+import './pwa-install.js';
 
 const appContent = document.getElementById('app-content');
 const headerTitle = document.getElementById('header-title');

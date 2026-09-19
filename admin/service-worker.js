@@ -1,6 +1,6 @@
 // Service Worker خاص بلوحة المدير العام - يُسجَّل بنطاق (scope) /admin/ فقط، منفصل عن تطبيق المحل
-const CACHE_NAME = 'hesabaty-admin-cache-v1';
-const RUNTIME_CACHE = 'hesabaty-admin-runtime-v1';
+const CACHE_NAME = 'hesabaty-admin-cache-v2';
+const RUNTIME_CACHE = 'hesabaty-admin-runtime-v2';
 
 const APP_SHELL = [
   './',
@@ -17,6 +17,8 @@ const APP_SHELL = [
   './js/admin-utils.js',
   '../css/style.css',
   '../css/responsive.css',
+  '../js/ui.js',
+  '../js/pwa-install.js',
   '../assets/icons/icon-192.png',
   '../assets/icons/icon-512.png',
   '../assets/icons/icon-maskable-192.png',

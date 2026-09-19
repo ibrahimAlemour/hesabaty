@@ -3,6 +3,7 @@ import { getSettings, updateSettings } from './database.js';
 import { localSignIn, pinSignIn, supabaseSignIn } from './auth.js';
 import { toastError, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { escapeHtml } from './utils.js';
+import { wireInstallButton, showIOSInstallInstructions } from './pwa-install.js';
 
 export async function renderLogin(container) {
   container.style.display = '';
@@ -17,6 +18,7 @@ export async function renderLogin(container) {
         <h2 style="margin:8px 0 2px;">${escapeHtml(settings.shopName || 'حساباتي')}</h2>
         <p style="color:var(--text-muted);font-size:13.5px;">${isSupabase ? 'تسجيل الدخول (حساب Supabase)' : 'تسجيل الدخول'}</p>
       </div>
+      <button class="btn btn-outline btn-block" id="pwa-install-btn" style="display:none;margin-bottom:14px;">📲 تثبيت التطبيق على الجهاز</button>
       <div class="card">
         <div class="form-group">
           <label>${isSupabase ? 'البريد الإلكتروني' : 'البريد الإلكتروني أو الاسم'}</label>
@@ -70,6 +72,8 @@ export async function renderLogin(container) {
     await updateSettings({ backendMode: 'local', setupCompleted: false, supabaseUrl: '', supabaseAnonKey: '' });
     window.location.reload();
   };
+
+  wireInstallButton(container.querySelector('#pwa-install-btn'), { onIOSInstructions: showIOSInstallInstructions });
 }
 
 function promptPin(cashier) {

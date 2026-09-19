@@ -2,7 +2,7 @@
 import * as db from './database.js';
 import * as remoteDb from './db-supabase.js';
 import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut } from './auth.js';
-import { getPendingCount, flushQueue } from './sync.js';
+import { getPendingCount, getPendingItems, flushQueue } from './sync.js';
 import { escapeHtml } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
@@ -12,6 +12,8 @@ export async function renderSettings(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
   const [settings, user, pendingSync] = await Promise.all([db.getSettings(), getCurrentUser(), getPendingCount()]);
   const canManage = canDelete(user);
+  const pendingItems = pendingSync ? await getPendingItems() : [];
+  const stuckError = pendingItems.find(i => i.lastError)?.lastError;
 
   container.innerHTML = `
     <div class="card">
@@ -74,8 +76,9 @@ export async function renderSettings(container) {
       <button class="btn btn-primary btn-block" id="st-sb-test">اختبار الاتصال والتفعيل</button>
       <div style="font-size:13px;margin-top:10px;">
         حالة المزامنة: <b>${settings.backendMode === 'supabase' ? (navigator.onLine ? 'متصل' : 'غير متصل - وضع محلي') : 'محلي فقط'}</b>
-        ${pendingSync ? ` - عمليات معلقة: <b style="color:var(--warning);">${pendingSync}</b>` : ''}
+        ${pendingSync ? ` - عمليات معلقة: <b style="color:var(--danger);">${pendingSync}</b>` : ''}
       </div>
+      ${stuckError ? `<p style="font-size:12px;color:var(--danger);margin-top:8px;">تعذّر رفع بعض العمليات: ${escapeHtml(stuckError)}</p>` : ''}
       ${settings.backendMode === 'supabase' ? `<button class="btn btn-secondary btn-block" style="margin-top:8px;" id="st-sync-now">مزامنة الآن</button>` : ''}
     </div>
 
@@ -168,7 +171,14 @@ function bind(container, settings) {
   if (sbTestBtn) sbTestBtn.onclick = () => testSupabaseConnection(container);
 
   const syncNowBtn = container.querySelector('#st-sync-now');
-  if (syncNowBtn) syncNowBtn.onclick = async () => { await flushQueue(); toastSuccess('تمت محاولة المزامنة'); renderSettings(container); };
+  if (syncNowBtn) syncNowBtn.onclick = async () => {
+    setLoading(syncNowBtn, true, 'جاري المزامنة...');
+    await flushQueue();
+    const remaining = await getPendingCount();
+    if (!remaining) toastSuccess('تمت مزامنة جميع العمليات بنجاح');
+    else toastError(`ما زال في ${remaining} عملية معلّقة - تحقق من رسالة الخطأ بالأسفل`);
+    renderSettings(container);
+  };
 
   const wipeBtn = container.querySelector('#st-wipe');
   if (wipeBtn) wipeBtn.onclick = async () => {

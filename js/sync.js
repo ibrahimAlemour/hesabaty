@@ -25,6 +25,12 @@ export async function getPendingCount() {
   return items.length;
 }
 
+// تفاصيل العمليات العالقة (تُستخدم بشاشة الإعدادات لعرض سبب تعثر المزامنة عند وجود خطأ حقيقي وليس مجرد انقطاع إنترنت)
+export async function getPendingItems() {
+  const items = await localDb.getAll('syncQueue');
+  return items.sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
 // معرّفات السجلات إلي لسا بانتظار الرفع لسوبابيس (تُستخدم لتمييزها بشارة "غير متزامن" بالواجهة)
 export async function getPendingIds(storeName) {
   const items = await localDb.getAll('syncQueue');
@@ -38,10 +44,25 @@ export async function getSyncStatus() {
   return pending ? 'pending' : 'synced';
 }
 
+// يعيد تهيئة عميل سوبابيس إذا لم يكن جاهزًا بعد (مثلاً لأن التطبيق فُتح أول مرة أوف لاين ولم تتحمّل مكتبة سوبابيس)
+// حتى لا تبقى العمليات عالقة للأبد بانتظار تهيئة كانت ستحدث فقط عند التنقل بين الشاشات
+async function ensureRemoteClient() {
+  if (remoteDb.getClient()) return true;
+  try {
+    const settings = await localDb.getById('settings', 'app');
+    if (!settings || settings.backendMode !== 'supabase' || !settings.supabaseUrl || !settings.supabaseAnonKey) return false;
+    await remoteDb.loadSupabaseScript();
+    await remoteDb.initSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
+    return !!remoteDb.getClient();
+  } catch (e) {
+    return false;
+  }
+}
+
 export async function flushQueue() {
   if (syncing) return;
   if (!navigator.onLine) return;
-  if (!remoteDb.getClient()) return;
+  if (!(await ensureRemoteClient())) return;
   syncing = true;
   notify('syncing');
   try {

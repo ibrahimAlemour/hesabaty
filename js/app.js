@@ -1,7 +1,7 @@
 // نقطة الدخول: التوجيه (Router) وهيكل الصفحة العام
 import { getSettings, updateSettings, pullFromRemote } from './database.js';
 import { isLoggedIn, getCurrentUser, refreshShopStatus, signOut } from './auth.js';
-import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus, getPendingCount } from './sync.js';
+import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus, getPendingIds } from './sync.js';
 import * as remoteDb from './db-supabase.js';
 import { toastError } from './ui.js';
 import { renderSetupWizard } from './setup.js';
@@ -192,13 +192,15 @@ async function applySyncIconStatus(status) {
   btn.classList.remove('sync-offline', 'sync-pending', 'sync-syncing', 'sync-synced');
   btn.classList.add(`sync-${status}`);
 
-  const pending = await getPendingCount();
+  // نعرض عدد عمليات البيع غير المتزامنة تحديدًا (لا العدد الخام لعناصر طابور المزامنة، لأن كل عملية بيع
+  // واحدة تُسجَّل داخليًا كعدة عناصر منفصلة: الفاتورة نفسها + أصنافها + حركة الصندوق + سجل التدقيق)
+  const pending = (await getPendingIds('sales')).size;
   const badge = document.getElementById('sync-pending-badge');
   if (badge) {
     if (pending > 0) { badge.textContent = pending > 99 ? '99+' : String(pending); badge.style.display = ''; }
     else badge.style.display = 'none';
   }
-  const suffix = pending > 0 ? ` (${pending} عملية بانتظار الرفع)` : '';
+  const suffix = pending > 0 ? ` (${pending} عملية بيع بانتظار الرفع)` : '';
   btn.title = (SYNC_ICON_TITLES[status] || '') + suffix;
 }
 

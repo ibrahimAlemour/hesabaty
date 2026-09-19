@@ -121,8 +121,16 @@ export async function isLoggedIn() {
   const settings = await getSettings();
   if (!settings.setupCompleted) return false;
   if (settings.backendMode === 'supabase') {
-    const session = await remoteDb.getSession();
-    return !!session && !!settings.currentUser;
+    if (!settings.currentUser) return false;
+    // بدون إنترنت (أو قبل اكتمال تحميل مكتبة Supabase) لا يوجد عميل سوبابيس جاهز للتحقق من الجلسة حيًّا؛
+    // في هذه الحالة نعتمد على آخر تسجيل دخول محفوظ محليًا حتى يستمر عمل التطبيق بدون إنترنت بعد أول دخول ناجح
+    if (!remoteDb.getClient()) return true;
+    try {
+      const session = await remoteDb.getSession();
+      return !!session;
+    } catch (e) {
+      return true; // فشل التحقق من الجلسة (مثلاً انقطاع مؤقت) - لا نسجّل خروج المستخدم قسرًا
+    }
   }
   return !!settings.currentUser && !!sessionStorage.getItem(SESSION_KEY);
 }

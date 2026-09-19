@@ -13,7 +13,8 @@ export async function renderSettings(container) {
   const [settings, user, pendingSync] = await Promise.all([db.getSettings(), getCurrentUser(), getPendingCount()]);
   const canManage = canDelete(user);
   const pendingItems = pendingSync ? await getPendingItems() : [];
-  const stuckError = pendingItems.find(i => i.lastError)?.lastError;
+  const stuckItem = pendingItems.find(i => i.lastError);
+  const stuckError = stuckItem?.lastError;
 
   container.innerHTML = `
     <div class="card">
@@ -78,7 +79,10 @@ export async function renderSettings(container) {
         حالة المزامنة: <b>${settings.backendMode === 'supabase' ? (navigator.onLine ? 'متصل' : 'غير متصل - وضع محلي') : 'محلي فقط'}</b>
         ${pendingSync ? ` - عمليات معلقة: <b style="color:var(--danger);">${pendingSync}</b>` : ''}
       </div>
-      ${stuckError ? `<p style="font-size:12px;color:var(--danger);margin-top:8px;">تعذّر رفع بعض العمليات: ${escapeHtml(stuckError)}</p>` : ''}
+      ${stuckError ? `
+      <p style="font-size:12px;color:var(--danger);margin-top:8px;">تعذّر رفع بعض العمليات: ${escapeHtml(stuckError)}</p>
+      <p style="font-size:10.5px;color:var(--text-muted);margin-top:4px;word-break:break-all;">تشخيص: shop_id بالعملية = ${escapeHtml(String(stuckItem.payload?.shop_id))} | shop_id الحالي = ${escapeHtml(String(settings.currentShopId))} | الجدول = ${escapeHtml(stuckItem.storeName)} | المحاولات = ${stuckItem.attempts}</p>
+      ` : ''}
       ${settings.backendMode === 'supabase' ? `<button class="btn btn-secondary btn-block" style="margin-top:8px;" id="st-sync-now">مزامنة الآن</button>` : ''}
     </div>
 

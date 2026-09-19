@@ -53,6 +53,20 @@ export async function createShopWithLogin(payload) {
   return data;
 }
 
+// حذف محل نهائيًا (لا يمكن التراجع): يحذف حساب دخوله وكل بياناته عبر نفس الـ Worker الآمن
+export async function deleteShopPermanently(shopId) {
+  const session = await getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/admin/delete-shop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ shopId })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل حذف المحل');
+  return data;
+}
+
 export async function updateShop(id, patch) {
   const { data, error } = await client().from('shops').update({ ...patch, updated_at: nowISO() }).eq('id', id).select().single();
   if (error) throw error;

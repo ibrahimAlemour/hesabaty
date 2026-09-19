@@ -119,8 +119,11 @@ begin
     values (demo_shop_id, 0, current_date, current_date + interval '365 days', 'اشتراك تجريبي تلقائي عند الترقية');
   end if;
 
-  -- تحويل كل حسابات owner الحالية إلى super_admin (أنت مالك المشروع الآن، لا مالك محل واحد)
-  update profiles set role = 'super_admin', shop_id = null where role = 'owner';
+  -- تحويل حساب owner الحالي إلى super_admin - مرة واحدة فقط (أول تشغيل) حتى لا يُعاد تنفيذها بالخطأ
+  -- على مالكي محلات حقيقيين أُنشئوا لاحقًا بنفس الدور 'owner' لو أُعيد تشغيل هذا الملف
+  if not exists (select 1 from profiles where role = 'super_admin') then
+    update profiles set role = 'super_admin', shop_id = null where role = 'owner';
+  end if;
 end $$;
 
 -- ---------- 5) دوال مساعدة آمنة من الاستدعاء الذاتي (SECURITY DEFINER + search_path ثابت) ----------
@@ -295,6 +298,24 @@ create policy admin_settings_read_all_auth on admin_settings for select using (a
 
 drop policy if exists admin_audit_admin_all on admin_audit_log;
 create policy admin_audit_admin_all on admin_audit_log for all using (is_super_admin()) with check (is_super_admin());
+
+-- ---------- 8) حذف محل نهائيًا: نجعل كل الجداول المرتبطة بـ shop_id تُحذف تلقائيًا (Cascade) ----------
+-- بدون هذا، حذف صف من جدول shops كان سيُرفض لوجود بيانات مرتبطة به (حماية افتراضية من Postgres)
+-- بعد هذا التعديل: حذف المحل من لوحة المدير يحذف معه كل فواتيره وزبائنه ومنتجاته وسجلاته دفعة واحدة ولا يمكن التراجع عنه
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['customers','products','sales','sale_items','payments','expenses','cash_transactions','audit_log','app_settings']
+  loop
+    execute format('alter table %I drop constraint if exists %I', t, t || '_shop_id_fkey');
+    execute format('alter table %I add constraint %I foreign key (shop_id) references shops(id) on delete cascade', t, t || '_shop_id_fkey');
+  end loop;
+end $$;
+
+alter table profiles drop constraint if exists profiles_shop_id_fkey;
+alter table profiles add constraint profiles_shop_id_fkey foreign key (shop_id) references shops(id) on delete cascade;
 
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).

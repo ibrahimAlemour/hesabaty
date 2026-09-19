@@ -68,7 +68,8 @@ export async function renderAdminSettings(container) {
 
 const ACTION_LABELS = {
   create_shop: 'إنشاء محل', suspend: 'تعليق حساب', reactivate: 'إعادة تفعيل',
-  update_subscription: 'تحديث اشتراك', record_payment: 'تسجيل دفعة', update_settings: 'تحديث الإعدادات'
+  update_subscription: 'تحديث اشتراك', record_payment: 'تسجيل دفعة', update_settings: 'تحديث الإعدادات',
+  delete_shop: 'حذف محل نهائيًا'
 };
 
 function auditRow(entry) {

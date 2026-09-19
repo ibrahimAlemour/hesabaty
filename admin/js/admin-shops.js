@@ -161,6 +161,12 @@ export async function renderShopDetail(container, shopId) {
         : `<button class="btn btn-danger" id="toggle-status-btn">🔒 تعليق الحساب</button>`}
     </div>
 
+    <div class="card" style="border:1.5px solid var(--danger-light);">
+      <div class="section-title" style="margin-top:0;color:var(--danger);">منطقة الخطر</div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;">حذف نهائي لا يمكن التراجع عنه: يحذف حساب دخول صاحب المحل وكل بياناته (فواتير، زبائن، منتجات، دفعات). استخدمه فقط لمحل تجريبي أو أُضيف بالخطأ.</p>
+      <button class="btn btn-danger btn-block" id="delete-shop-btn">🗑️ حذف المحل نهائيًا</button>
+    </div>
+
     <div class="section-title">سجل فترات الاشتراك</div>
     <div class="card" style="padding:6px 10px;">
       ${subs.length ? subs.map(subRow).join('') : emptyState('📅', 'لا يوجد اشتراك مسجّل بعد')}
@@ -176,6 +182,42 @@ export async function renderShopDetail(container, shopId) {
   container.querySelector('#record-payment-btn').onclick = () => openRecordPaymentSheet(container, shop, latestSub);
   container.querySelector('#edit-shop-btn').onclick = () => openEditShopSheet(container, shop);
   container.querySelector('#toggle-status-btn').onclick = () => toggleShopStatus(container, shop);
+  container.querySelector('#delete-shop-btn').onclick = () => openDeleteShopSheet(shop);
+}
+
+function openDeleteShopSheet(shop) {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3 style="color:var(--danger);">🗑️ حذف "${escapeHtml(shop.name)}" نهائيًا</h3></div>
+    <div class="confirm-box" style="padding:0;">
+      <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86l-8.02 13.9A1.5 1.5 0 003.55 20h16.9a1.5 1.5 0 001.28-2.24l-8.02-13.9a1.5 1.5 0 00-2.56 0z"/></svg></div>
+      <p>سيُحذف حساب دخول صاحب المحل وكل الفواتير والزبائن والمنتجات والدفعات المرتبطة به نهائيًا. لا يمكن التراجع عن هذا الإجراء أبدًا.</p>
+    </div>
+    <div class="form-group">
+      <label>للتأكيد، اكتب اسم المحل بالضبط: <b>${escapeHtml(shop.name)}</b></label>
+      <input type="text" id="ds-confirm-name" placeholder="${escapeHtml(shop.name)}">
+    </div>
+    <button class="btn btn-danger btn-block" id="ds-confirm-btn" disabled>حذف نهائي</button>
+  `, { closeOnBackdrop: false });
+
+  const input = overlay.querySelector('#ds-confirm-name');
+  const btn = overlay.querySelector('#ds-confirm-btn');
+  input.oninput = () => { btn.disabled = input.value.trim() !== shop.name; };
+
+  btn.onclick = async () => {
+    setLoading(btn, true, 'جاري الحذف...');
+    try {
+      const admin = await getCurrentAdmin();
+      await adb.deleteShopPermanently(shop.id);
+      await adb.logAdminAction(admin, 'delete_shop', null, { deletedShopId: shop.id, name: shop.name });
+      closeSheet();
+      toastSuccess('تم حذف المحل نهائيًا');
+      window.location.hash = '#/shops';
+    } catch (err) {
+      console.error(err);
+      toastError(err.message || 'حدث خطأ أثناء الحذف. حاول مرة أخرى.');
+      setLoading(btn, false);
+    }
+  };
 }
 
 function subRow(sub) {

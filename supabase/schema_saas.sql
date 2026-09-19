@@ -330,6 +330,14 @@ alter table admin_audit_log add constraint admin_audit_log_target_shop_id_fkey f
 alter table sales drop constraint if exists sales_invoice_number_key;
 alter table sales add constraint sales_invoice_number_shop_unique unique (shop_id, invoice_number);
 
+-- ---------- 10) إلغاء تفرّد رقم الفاتورة نهائيًا: العدّاد محلي على كل جهاز، لا يُزامَن قبل الاستخدام ----------
+-- حتى ضمن نفس المحل، لو دخل صاحب المحل من جهازين مختلفين (موبايل + جهاز كاشير مثلاً) وكل جهاز أوف لاين،
+-- كل جهاز يرقّم فواتيره محليًا بدءًا من نفس النقطة فيتكرر نفس الرقم (INV-000005 من الجهازين مثلاً)
+-- ويعلق رفع الفاتورة الثانية للأبد بنفس خطأ duplicate key. الهوية الحقيقية والوحيدة لكل فاتورة هي id (uuid)
+-- وهو مفتاح أساسي أصلاً، فرقم الفاتورة (invoice_number) يبقى تسمية عرض فقط بدون قيد تفرّد على الإطلاق
+
+alter table sales drop constraint if exists sales_invoice_number_shop_unique;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

@@ -388,7 +388,7 @@ export async function createSale(payload) {
       invoice_number: label,
       invoice_seq: number,
       customer_id: payload.customerId || null,
-      customer_name_snapshot: payload.customerName || 'زبون نقدي',
+      customer_name_snapshot: payload.customerName || 'زبون بدون اسم',
       subtotal, total_cost: totalCost, total_profit: totalProfit, total_amount: subtotal,
       paid_cash: paidCash, paid_transfer: paidTransfer, paid_debt: paidDebt,
       transfer_reference: payload.transferReference || '',

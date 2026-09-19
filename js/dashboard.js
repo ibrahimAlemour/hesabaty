@@ -92,7 +92,7 @@ function saleRow(sale, pendingIds) {
     <div class="list-item" style="cursor:pointer;" data-nav="#/invoice/${sale.id}">
       <div class="avatar">${escapeHtml((sale.customer_name_snapshot || 'ز')[0])}</div>
       <div class="info">
-        <div class="title">${escapeHtml(sale.customer_name_snapshot || 'زبون نقدي')}</div>
+        <div class="title">${escapeHtml(sale.customer_name_snapshot || 'زبون بدون اسم')}</div>
         <div class="subtitle">${sale.invoice_number}</div>
       </div>
       <div style="text-align:left;">

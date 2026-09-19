@@ -21,7 +21,7 @@ export async function renderInvoice(container, saleId) {
         <span>${sale.invoice_number}</span>
         <span>${formatDateTime(sale.created_at)}</span>
       </div>
-      <div style="font-weight:700;margin-bottom:10px;">الزبون: ${escapeHtml(sale.customer_name_snapshot || 'زبون نقدي')}</div>
+      <div style="font-weight:700;margin-bottom:10px;">الزبون: ${escapeHtml(sale.customer_name_snapshot || 'زبون بدون اسم')}</div>
       <table class="simple-table">
         <thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
         <tbody>

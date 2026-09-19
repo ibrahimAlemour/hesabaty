@@ -48,7 +48,7 @@ function renderSaleScreen(container) {
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar">${saleState.customer ? escapeHtml(saleState.customer.name[0]) : '💵'}</div>
         <div>
-          <div style="font-weight:700;font-size:14.5px;">${saleState.customer ? escapeHtml(saleState.customer.name) : 'زبون نقدي'}</div>
+          <div style="font-weight:700;font-size:14.5px;">${saleState.customer ? escapeHtml(saleState.customer.name) : 'زبون بدون اسم'}</div>
           <div style="font-size:12px;color:var(--text-muted);">${saleState.customer ? 'اضغط لتغيير الزبون' : 'اضغط لاختيار زبون'}</div>
         </div>
       </div>
@@ -290,7 +290,7 @@ function openCustomerSheet(container) {
       <input type="text" id="customer-search" placeholder="ابحث عن زبون...">
     </div>
     <div class="list-item" style="cursor:pointer;" id="pick-cash-customer">
-      <div class="avatar">💵</div><div class="info"><div class="title">زبون نقدي</div></div>
+      <div class="avatar">💵</div><div class="info"><div class="title">زبون بدون اسم</div></div>
     </div>
     <div id="customer-results" class="customer-select-list"></div>
     <button class="btn btn-secondary btn-block" style="margin-top:10px;" id="add-new-customer-btn">+ إضافة زبون جديد</button>
@@ -408,7 +408,7 @@ async function completeSale(container) {
   try {
     const payload = {
       customerId: saleState.customer ? saleState.customer.id : null,
-      customerName: saleState.customer ? saleState.customer.name : 'زبون نقدي',
+      customerName: saleState.customer ? saleState.customer.name : 'زبون بدون اسم',
       items: saleState.items,
       paidCash: fromCents(cash), paidTransfer: fromCents(transfer), paidDebt: fromCents(debt),
       transferReference: saleState.transferRef, transferBank: saleState.transferBank,

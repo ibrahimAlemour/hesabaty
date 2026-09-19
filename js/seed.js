@@ -72,7 +72,7 @@ export async function loadSeedData() {
 
       await db.createSale({
         customerId: customer ? customer.id : null,
-        customerName: customer ? customer.name : 'زبون نقدي',
+        customerName: customer ? customer.name : 'زبون بدون اسم',
         items,
         paidCash, paidTransfer, paidDebt,
         transferReference: paidTransfer ? `TR-${Math.floor(1000 + Math.random() * 9000)}` : '',

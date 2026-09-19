@@ -44,7 +44,7 @@ function transferRow(t) {
     <div class="list-item">
       <div class="avatar" style="background:var(--blue-light);color:var(--blue);">📱</div>
       <div class="info">
-        <div class="title">${escapeHtml(t.customerName || 'زبون نقدي')}</div>
+        <div class="title">${escapeHtml(t.customerName || 'زبون بدون اسم')}</div>
         <div class="subtitle">${t.bank ? escapeHtml(t.bank) + ' - ' : ''}${t.referenceNumber ? 'رقم: ' + escapeHtml(t.referenceNumber) : (t.notes ? escapeHtml(t.notes) : '')}</div>
       </div>
       <div style="text-align:left;">

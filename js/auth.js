@@ -67,15 +67,44 @@ export async function supabaseSignIn(email, password) {
     await remoteDb.signOut();
     throw new Error('لا يوجد ملف تعريف (profile) لهذا الحساب بجدول profiles. أضف صفًا بنفس الـ UID من لوحة Supabase.');
   }
+  if (profile.role === 'super_admin') {
+    await remoteDb.signOut();
+    throw new Error('هذا حساب مدير عام. استخدم لوحة المدير العام (admin) بدل تطبيق المحل.');
+  }
+
+  let shopStatus = 'active';
+  if (profile.shop_id) {
+    const shop = await remoteDb.getShop(profile.shop_id);
+    if (!shop) {
+      await remoteDb.signOut();
+      throw new Error('تعذر العثور على بيانات المحل المرتبط بهذا الحساب.');
+    }
+    shopStatus = shop.status;
+  }
+
   const user = { id: profile.id, name: profile.name, role: profile.role };
-  await updateSettings({ currentUser: user });
+  await updateSettings({ currentUser: user, currentShopId: profile.shop_id || null, shopStatus });
   sessionStorage.setItem(SESSION_KEY, user.id);
   return user;
 }
 
+// يُستدعى عند كل فتح للتطبيق (وضع سوبابيس) للتأكد أن حالة تعليق المحل محدّثة
+export async function refreshShopStatus() {
+  const settings = await getSettings();
+  if (settings.backendMode !== 'supabase' || !settings.currentShopId) return settings.shopStatus || 'active';
+  try {
+    const shop = await remoteDb.getShop(settings.currentShopId);
+    const status = shop ? shop.status : 'active';
+    await updateSettings({ shopStatus: status });
+    return status;
+  } catch (e) {
+    return settings.shopStatus || 'active';
+  }
+}
+
 export async function signOut() {
   sessionStorage.removeItem(SESSION_KEY);
-  await updateSettings({ currentUser: null });
+  await updateSettings({ currentUser: null, currentShopId: null, shopStatus: 'active' });
   try { await remoteDb.signOut(); } catch (e) { /* لا يوجد اتصال سوبابيس نشط */ }
 }
 

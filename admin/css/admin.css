@@ -1,0 +1,33 @@
+/* تخصيصات لوحة المدير العام - تُبنى فوق نفس نظام التصميم العام (style.css) */
+
+.admin-sidebar { display: none; }
+@media (min-width: 900px) {
+  .admin-sidebar { display: flex; }
+  #mobile-logout { display: none; }
+}
+@media (max-width: 899px) {
+  .admin-sidebar { display: none !important; }
+}
+
+.badge.status-active { background: var(--success-light); color: var(--success); }
+.badge.status-expired { background: var(--warning-light); color: var(--warning); }
+.badge.status-overdue { background: var(--danger-light); color: var(--danger); }
+.badge.status-suspended { background: var(--border); color: var(--text-muted); }
+.badge.status-pending { background: var(--blue-light); color: var(--blue); }
+
+.admin-table-row {
+  display: flex; align-items: center; gap: 10px; padding: 13px 4px; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.admin-table-row:last-child { border-bottom: none; }
+.admin-table-row:active { background: var(--bg); }
+.admin-table-row .shop-name { font-weight: 700; font-size: 14.5px; }
+.admin-table-row .shop-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (min-width: 640px) { .kpi-row { grid-template-columns: repeat(4, 1fr); } }
+
+.admin-detail-header {
+  text-align: center; padding: 8px 0 16px;
+}
+.admin-detail-header .shop-title { font-size: 19px; font-weight: 800; margin-top: 6px; }
+.admin-detail-header .shop-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }

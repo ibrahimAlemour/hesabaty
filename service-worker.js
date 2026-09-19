@@ -30,6 +30,7 @@ const APP_SHELL = [
   './js/transfers.js',
   './js/ui.js',
   './js/utils.js',
+  './js/saas-config.js',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
   './assets/icons/icon-maskable-192.png',

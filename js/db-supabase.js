@@ -117,9 +117,23 @@ export async function getSession() {
   return data.session;
 }
 
-// جدول profiles: يربط مستخدم Supabase Auth بالاسم والدور (owner/cashier) داخل التطبيق
+// جدول profiles: يربط مستخدم Supabase Auth بالاسم والدور (owner/cashier/super_admin) والمحل التابع له
 export async function getProfile(userId) {
   const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+// بيانات المحل (للتحقق من حالة التعليق) ورسالة التواصل العامة
+export async function getShop(shopId) {
+  if (!shopId) return null;
+  const { data, error } = await supabaseClient.from('shops').select('*').eq('id', shopId).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function getAdminSettings() {
+  const { data, error } = await supabaseClient.from('admin_settings').select('*').eq('id', 'global').maybeSingle();
   if (error) throw error;
   return data || null;
 }

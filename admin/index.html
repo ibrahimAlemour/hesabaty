@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>لوحة المدير العام - حساباتي</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1e293b">
+<link rel="icon" href="../assets/icons/favicon-32.png">
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/responsive.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="theme-auto admin-body">
+
+<div id="login-root"></div>
+
+<div id="app-shell" class="app-shell" style="display:none;">
+  <aside class="desktop-sidebar admin-sidebar" id="desktop-sidebar">
+    <div class="brand">🛡️ لوحة المدير</div>
+    <nav id="desktop-sidebar-links"></nav>
+    <button class="btn btn-secondary btn-block" id="sidebar-logout" style="margin-top:auto;">تسجيل الخروج</button>
+  </aside>
+
+  <div class="main-col">
+    <header class="app-header">
+      <div class="header-title-wrap" style="display:flex;align-items:center;gap:6px;">
+        <button id="back-btn" class="back-btn" style="display:none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <span class="header-title" id="header-title">لوحة المدير العام</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="mobile-logout" title="تسجيل الخروج">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        </button>
+      </div>
+    </header>
+    <main id="app-content"></main>
+  </div>
+</div>
+
+<nav class="bottom-nav" id="bottom-nav"></nav>
+
+<script type="module" src="js/admin-app.js"></script>
+</body>
+</html>

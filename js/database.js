@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS = {
   seedLoaded: false,
   currentUser: null, // { id, name, role }
   users: [], // حسابات محلية: { id, name, email, passwordHash, role }
+  currentShopId: null, // معرّف المحل بجدول shops (وضع سوبابيس فقط)
+  shopStatus: 'active', // active | suspended (يُحدَّث بعد كل تسجيل دخول عبر سوبابيس)
   updated_at: nowISO()
 };
 
@@ -67,19 +69,74 @@ function withInvoiceLock(fn) {
   return run;
 }
 
+// جدول app_settings بسوبابيس أسماء أعمدته snake_case، بينما الإعدادات المحلية كائن JS بأسماء camelCase
+// هذا الترابط يحوّل بين الشكلين في الاتجاهين، ويستثني الحقول المحلية البحتة (لا تُشارك بين الأجهزة)
+const SETTINGS_REMOTE_FIELDS = {
+  shopName: 'shop_name', phone: 'phone', address: 'address', currency: 'currency',
+  timezone: 'timezone', theme: 'theme', lastInvoiceNumber: 'last_invoice_number',
+  openingCashBalance: 'opening_cash_balance', openingCashDate: 'opening_cash_date'
+};
+
+function settingsToRemote(record, shopId) {
+  const payload = { id: shopId, shop_id: shopId, updated_at: record.updated_at || nowISO() };
+  for (const [local, remote] of Object.entries(SETTINGS_REMOTE_FIELDS)) payload[remote] = record[local];
+  return payload;
+}
+
+function settingsFromRemote(remoteRow) {
+  const patch = {};
+  for (const [local, remote] of Object.entries(SETTINGS_REMOTE_FIELDS)) {
+    if (remoteRow[remote] !== undefined && remoteRow[remote] !== null) patch[local] = remoteRow[remote];
+  }
+  return patch;
+}
+
+// نحوّل السجل المحلي إلى شكل ملائم لسوبابيس متعدد المحلات: نُرفق shop_id لكل الجداول الأخرى
+function toRemotePayload(storeName, record, shopId) {
+  if (storeName === 'settings') return settingsToRemote(record, shopId);
+  return { ...record, shop_id: shopId };
+}
+
 // ---------- كتابة موحّدة (محلي + مزامنة عند تفعيل سوبابيس) ----------
 async function writeRecord(storeName, record) {
   await localDb.put(storeName, record);
   const s = await getSettings();
   if (s.backendMode === 'supabase') {
+    // قبل أول تسجيل دخول فعلي لا نعرف shop_id بعد؛ لا نحاول الرفع حتى لا يعلق طلب خاطئ بطابور المزامنة للأبد
+    if (!s.currentShopId) return record;
+    const payload = toRemotePayload(storeName, record, s.currentShopId);
     if (navigator.onLine && remoteDb.getClient()) {
-      try { await remoteDb.put(storeName, record); }
-      catch (e) { await sync.enqueue(storeName, 'put', record); }
+      try { await remoteDb.put(storeName, payload); }
+      catch (e) { await sync.enqueue(storeName, 'put', payload); }
     } else {
-      await sync.enqueue(storeName, 'put', record);
+      await sync.enqueue(storeName, 'put', payload);
     }
   }
   return record;
+}
+
+// يسحب كل بيانات المحل من سوبابيس ويحدّث النسخة المحلية (IndexedDB) - يُستدعى بعد تسجيل الدخول وعند بدء التطبيق
+// بذلك يمكن رؤية نفس البيانات من أي جهاز جديد يسجّل دخوله بنفس الحساب
+const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog'];
+export async function pullFromRemote() {
+  const s = await getSettings();
+  if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
+
+  for (const storeName of REMOTE_PULL_STORES) {
+    try {
+      const rows = await remoteDb.getAll(storeName);
+      if (rows.length) await localDb.bulkPut(storeName, rows);
+    } catch (e) {
+      console.error(`فشل سحب بيانات ${storeName} من سوبابيس`, e);
+    }
+  }
+
+  try {
+    const remoteSettings = await remoteDb.getById('settings', s.currentShopId);
+    if (remoteSettings) await updateSettings(settingsFromRemote(remoteSettings));
+  } catch (e) {
+    console.error('فشل سحب إعدادات المحل من سوبابيس', e);
+  }
 }
 
 async function addAudit(entityType, entityId, action, changes) {

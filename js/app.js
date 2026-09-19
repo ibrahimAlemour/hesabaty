@@ -1,6 +1,6 @@
 // نقطة الدخول: التوجيه (Router) وهيكل الصفحة العام
-import { getSettings } from './database.js';
-import { isLoggedIn, getCurrentUser } from './auth.js';
+import { getSettings, updateSettings, pullFromRemote } from './database.js';
+import { isLoggedIn, getCurrentUser, refreshShopStatus, signOut } from './auth.js';
 import { initAutoSync, flushQueue } from './sync.js';
 import * as remoteDb from './db-supabase.js';
 import { toastError } from './ui.js';
@@ -21,6 +21,7 @@ import { renderDebts } from './debts.js';
 const appContent = document.getElementById('app-content');
 const headerTitle = document.getElementById('header-title');
 const backBtn = document.getElementById('back-btn');
+let hasPulledThisSession = false;
 
 const NAV_ITEMS = [
   { path: '#/dashboard', label: 'الرئيسية', icon: 'home' },
@@ -55,6 +56,28 @@ const ROUTES = [
   { pattern: /^#\/invoice\/([\w-]+)$/, title: 'الفاتورة', showBack: true, render: (m) => renderInvoice(appContent, m[1]) },
   { pattern: /^#\/more$/, title: 'المزيد', render: () => renderMore(appContent) }
 ];
+
+async function renderSuspendedScreen(container) {
+  container.style.display = '';
+  let message = 'انتهى اشتراكك. للتجديد تواصل معنا.';
+  try {
+    const adminSettings = await remoteDb.getAdminSettings();
+    if (adminSettings && adminSettings.contact_message) message = adminSettings.contact_message;
+  } catch (e) { /* استخدم الرسالة الافتراضية إن تعذر الجلب */ }
+
+  container.innerHTML = `
+    <div class="setup-wizard" style="justify-content:center;text-align:center;">
+      <div style="font-size:52px;">🔒</div>
+      <h2 style="margin:10px 0 6px;">الحساب معلّق مؤقتًا</h2>
+      <p style="color:var(--text-muted);font-size:14.5px;line-height:1.8;margin-bottom:20px;">${message.replace(/</g, '&lt;')}</p>
+      <p style="color:var(--text-muted);font-size:12.5px;">بياناتك وفواتيرك وديونك محفوظة بالكامل ولن تُحذف.</p>
+      <button class="btn btn-secondary btn-block" id="suspended-logout" style="margin-top:20px;">تسجيل الخروج</button>
+    </div>`;
+  container.querySelector('#suspended-logout').onclick = async () => {
+    await signOut();
+    window.location.reload();
+  };
+}
 
 function renderMore(container) {
   container.innerHTML = `
@@ -110,9 +133,25 @@ async function router() {
     renderLogin(document.getElementById('login-root'));
     return;
   }
+
+  if (settings.backendMode === 'supabase') {
+    const status = await refreshShopStatus();
+    if (status === 'suspended') {
+      document.getElementById('app-shell').style.display = 'none';
+      document.getElementById('setup-root').innerHTML = '';
+      await renderSuspendedScreen(document.getElementById('login-root'));
+      return;
+    }
+  }
+
   document.getElementById('app-shell').style.display = '';
   document.getElementById('login-root').innerHTML = '';
   document.getElementById('setup-root').innerHTML = '';
+
+  if (settings.backendMode === 'supabase' && !hasPulledThisSession) {
+    hasPulledThisSession = true;
+    pullFromRemote().catch(e => console.error('تعذر سحب البيانات من سوبابيس', e));
+  }
 
   for (const route of ROUTES) {
     const m = hash.match(route.pattern);

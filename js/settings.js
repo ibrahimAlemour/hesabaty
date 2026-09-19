@@ -5,6 +5,7 @@ import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut } fro
 import { getPendingCount, flushQueue } from './sync.js';
 import { escapeHtml } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
+import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
 
 export async function renderSettings(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
@@ -61,8 +62,8 @@ export async function renderSettings(container) {
     <div class="card">
       <div class="section-title" style="margin-top:0;">اتصال Supabase</div>
       <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">اختياري. اتركه فارغًا للعمل محليًا بدون إنترنت.</p>
-      <div class="form-group"><label>Supabase URL</label><input type="text" id="st-sb-url" value="${escapeHtml(settings.supabaseUrl || '')}" placeholder="https://xxxx.supabase.co"></div>
-      <div class="form-group"><label>Supabase Anon Key</label><input type="text" id="st-sb-key" value="${escapeHtml(settings.supabaseAnonKey || '')}" placeholder="anon key العلني فقط"></div>
+      <div class="form-group"><label>Supabase URL</label><input type="text" id="st-sb-url" value="${escapeHtml(settings.supabaseUrl || SAAS_SUPABASE_URL || '')}" placeholder="https://xxxx.supabase.co"></div>
+      <div class="form-group"><label>Supabase Anon Key</label><input type="text" id="st-sb-key" value="${escapeHtml(settings.supabaseAnonKey || SAAS_SUPABASE_ANON_KEY || '')}" placeholder="anon key العلني فقط"></div>
       <button class="btn btn-primary btn-block" id="st-sb-test">اختبار الاتصال والتفعيل</button>
       <div style="font-size:13px;margin-top:10px;">
         حالة المزامنة: <b>${settings.backendMode === 'supabase' ? (navigator.onLine ? 'متصل' : 'غير متصل - وضع محلي') : 'محلي فقط'}</b>

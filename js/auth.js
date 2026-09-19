@@ -73,6 +73,7 @@ export async function supabaseSignIn(email, password) {
   }
 
   let shopStatus = 'active';
+  const patch = {};
   if (profile.shop_id) {
     const shop = await remoteDb.getShop(profile.shop_id);
     if (!shop) {
@@ -80,10 +81,13 @@ export async function supabaseSignIn(email, password) {
       throw new Error('تعذر العثور على بيانات المحل المرتبط بهذا الحساب.');
     }
     shopStatus = shop.status;
+    // احتياط: لو ما وُجد بعد صف إعدادات مفصّل لهذا المحل (app_settings)، نستخدم اسم المحل من جدول shops مباشرة
+    // حتى يظهر صحيحًا فورًا بدل القيمة الافتراضية، ثم تكمل pullFromRemote تفاصيل الإعدادات الباقية لاحقًا
+    if (shop.name) patch.shopName = shop.name;
   }
 
   const user = { id: profile.id, name: profile.name, role: profile.role };
-  await updateSettings({ currentUser: user, currentShopId: profile.shop_id || null, shopStatus });
+  await updateSettings({ ...patch, currentUser: user, currentShopId: profile.shop_id || null, shopStatus });
   sessionStorage.setItem(SESSION_KEY, user.id);
   return user;
 }

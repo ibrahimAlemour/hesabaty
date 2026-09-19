@@ -148,9 +148,15 @@ async function router() {
   document.getElementById('login-root').innerHTML = '';
   document.getElementById('setup-root').innerHTML = '';
 
+  // ننتظر أول مزامنة بعد الدخول قبل عرض أي شاشة، حتى لا تظهر بيانات افتراضية قديمة (اسم المحل مثلاً)
+  // قبل أن تصل البيانات الحقيقية من سوبابيس
   if (settings.backendMode === 'supabase' && !hasPulledThisSession) {
+    appContent.innerHTML = `<div style="text-align:center;padding:60px 16px;color:var(--text-muted);">
+      <div class="loading-spinner" style="border-top-color:var(--primary);width:26px;height:26px;"></div>
+      <p style="margin-top:14px;">جاري تحميل بيانات محلك...</p>
+    </div>`;
     hasPulledThisSession = true;
-    pullFromRemote().catch(e => console.error('تعذر سحب البيانات من سوبابيس', e));
+    try { await pullFromRemote(); } catch (e) { console.error('تعذر سحب البيانات من سوبابيس', e); }
   }
 
   for (const route of ROUTES) {

@@ -56,6 +56,23 @@ export async function pinSignIn(userId, pin) {
   return user;
 }
 
+// تسجيل الدخول عبر Supabase Auth: يُستخدم فقط عندما يكون التطبيق متصلاً بسوبابيس (backendMode = 'supabase')
+// يتطلب أن يكون المستخدم قد أُنشئ مسبقًا من لوحة Supabase مع صف مطابق بجدول profiles
+export async function supabaseSignIn(email, password) {
+  await remoteDb.signIn(email, password);
+  const session = await remoteDb.getSession();
+  if (!session) throw new Error('تعذر تسجيل الدخول');
+  const profile = await remoteDb.getProfile(session.user.id);
+  if (!profile) {
+    await remoteDb.signOut();
+    throw new Error('لا يوجد ملف تعريف (profile) لهذا الحساب بجدول profiles. أضف صفًا بنفس الـ UID من لوحة Supabase.');
+  }
+  const user = { id: profile.id, name: profile.name, role: profile.role };
+  await updateSettings({ currentUser: user });
+  sessionStorage.setItem(SESSION_KEY, user.id);
+  return user;
+}
+
 export async function signOut() {
   sessionStorage.removeItem(SESSION_KEY);
   await updateSettings({ currentUser: null });
@@ -70,6 +87,10 @@ export async function getCurrentUser() {
 export async function isLoggedIn() {
   const settings = await getSettings();
   if (!settings.setupCompleted) return false;
+  if (settings.backendMode === 'supabase') {
+    const session = await remoteDb.getSession();
+    return !!session && !!settings.currentUser;
+  }
   return !!settings.currentUser && !!sessionStorage.getItem(SESSION_KEY);
 }
 

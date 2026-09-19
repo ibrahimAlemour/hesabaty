@@ -1,7 +1,8 @@
 // نقطة الدخول: التوجيه (Router) وهيكل الصفحة العام
 import { getSettings } from './database.js';
 import { isLoggedIn, getCurrentUser } from './auth.js';
-import { initAutoSync } from './sync.js';
+import { initAutoSync, flushQueue } from './sync.js';
+import * as remoteDb from './db-supabase.js';
 import { toastError } from './ui.js';
 import { renderSetupWizard } from './setup.js';
 import { renderLogin } from './login.js';
@@ -83,7 +84,6 @@ async function router() {
   let hash = window.location.hash;
   if (!hash || hash === '#/' || hash === '#') hash = '#/dashboard';
 
-  const loggedIn = await isLoggedIn();
   const settings = await getSettings();
   applyTheme(settings.theme || 'auto');
 
@@ -92,6 +92,18 @@ async function router() {
     renderSetupWizard(document.getElementById('setup-root'));
     return;
   }
+
+  if (settings.backendMode === 'supabase' && !remoteDb.getClient()) {
+    try {
+      await remoteDb.loadSupabaseScript();
+      await remoteDb.initSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
+      flushQueue();
+    } catch (e) {
+      console.error('تعذر تهيئة اتصال Supabase', e);
+    }
+  }
+
+  const loggedIn = await isLoggedIn();
   if (!loggedIn) {
     document.getElementById('app-shell').style.display = 'none';
     document.getElementById('setup-root').innerHTML = '';

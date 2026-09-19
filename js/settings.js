@@ -36,6 +36,9 @@ export async function renderSettings(container) {
     ${canManage ? `
     <div class="card">
       <div class="section-title" style="margin-top:0;">إدارة المستخدمين</div>
+      ${settings.backendMode === 'supabase' ? `
+      <p style="font-size:12.5px;color:var(--text-muted);">التطبيق متصل بسوبابيس الآن، فإضافة الحسابات تتم من لوحة Supabase مباشرة: Authentication → Add user، ثم أضف صفًا مطابقًا بجدول profiles بدور "cashier".</p>
+      ` : `
       <ul>
         ${(settings.users || []).map(u => `
           <li class="list-item">
@@ -45,6 +48,7 @@ export async function renderSettings(container) {
           </li>`).join('')}
       </ul>
       <button class="btn btn-secondary btn-block" id="st-add-cashier" style="margin-top:10px;">+ إضافة حساب كاشير</button>
+      `}
     </div>
 
     <div class="card">
@@ -165,17 +169,6 @@ function bind(container, settings) {
   };
 }
 
-async function loadSupabaseScript() {
-  if (window.supabase) return;
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-    script.onload = resolve;
-    script.onerror = () => reject(new Error('فشل تحميل مكتبة Supabase'));
-    document.head.appendChild(script);
-  });
-}
-
 async function testSupabaseConnection(container) {
   const btn = container.querySelector('#st-sb-test');
   const url = container.querySelector('#st-sb-url').value.trim();
@@ -183,11 +176,11 @@ async function testSupabaseConnection(container) {
   if (!url || !key) return toastError('أدخل رابط ومفتاح Supabase');
   setLoading(btn, true, 'جاري الاختبار...');
   try {
-    await loadSupabaseScript();
+    await remoteDb.loadSupabaseScript();
     const result = await remoteDb.testConnection({ url, anonKey: key });
     if (!result.ok) throw new Error(result.message);
     await db.updateSettings({ supabaseUrl: url, supabaseAnonKey: key, backendMode: 'supabase' });
-    toastSuccess('تم الاتصال بنجاح وتفعيل المزامنة مع Supabase');
+    toastSuccess('تم الاتصال بنجاح! سجّل الخروج الآن وادخل بحساب Supabase الذي أنشأته لبدء المزامنة');
     renderSettings(container);
   } catch (err) {
     toastError('فشل الاتصال: تحقق من الرابط والمفتاح، أو أن الجداول غير منشأة بعد.');

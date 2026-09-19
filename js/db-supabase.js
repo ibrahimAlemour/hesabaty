@@ -84,18 +84,23 @@ export async function getByIndex(storeName, column, value) {
   return data || [];
 }
 
+// نتحقق من صحة الرابط والمفتاح عبر جذر REST API مباشرة (بدون المرور بجداول محمية بـ RLS تحتاج تسجيل دخول)
 export async function testConnection(config) {
   try {
+    if (!isSupabaseConfigured(config)) throw new Error('أدخل الرابط والمفتاح');
     await initSupabaseClient(config);
-    const { error } = await supabaseClient.from('app_settings').select('id').limit(1);
-    if (error) throw error;
+    const res = await fetch(`${config.url.replace(/\/$/, '')}/rest/v1/`, {
+      headers: { apikey: config.anonKey }
+    });
+    if (res.status === 401 || res.status === 404) throw new Error('الرابط أو المفتاح غير صحيح');
+    if (!res.ok && res.status !== 200) throw new Error(`تعذر الوصول للخادم (${res.status})`);
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e.message || String(e) };
   }
 }
 
-// المصادقة (Supabase Auth) - اختيارية وبسيطة
+// المصادقة (Supabase Auth)
 export async function signIn(email, password) {
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) throw error;
@@ -108,4 +113,26 @@ export async function getSession() {
   if (!supabaseClient) return null;
   const { data } = await supabaseClient.auth.getSession();
   return data.session;
+}
+
+// جدول profiles: يربط مستخدم Supabase Auth بالاسم والدور (owner/cashier) داخل التطبيق
+export async function getProfile(userId) {
+  const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+// تحميل مكتبة supabase-js من CDN مرة واحدة فقط عند الحاجة
+let supabaseScriptPromise = null;
+export function loadSupabaseScript() {
+  if (window.supabase && window.supabase.createClient) return Promise.resolve();
+  if (supabaseScriptPromise) return supabaseScriptPromise;
+  supabaseScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+    script.onload = resolve;
+    script.onerror = () => { supabaseScriptPromise = null; reject(new Error('فشل تحميل مكتبة Supabase')); };
+    document.head.appendChild(script);
+  });
+  return supabaseScriptPromise;
 }

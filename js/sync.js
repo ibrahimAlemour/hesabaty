@@ -7,18 +7,35 @@ import { toastWarning, toastSuccess } from './ui.js';
 let syncing = false;
 const listeners = [];
 
-export function onSyncStatusChange(cb) { listeners.push(cb); }
+export function onSyncStatusChange(cb) {
+  listeners.push(cb);
+  return () => { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1); };
+}
 function notify(status) { listeners.forEach(cb => cb(status)); }
 
 export async function enqueue(storeName, operation, payload) {
   const item = { id: uuid(), storeName, operation, payload, created_at: nowISO(), attempts: 0 };
   await localDb.put('syncQueue', item);
+  notify('pending');
   return item;
 }
 
 export async function getPendingCount() {
   const items = await localDb.getAll('syncQueue');
   return items.length;
+}
+
+// معرّفات السجلات إلي لسا بانتظار الرفع لسوبابيس (تُستخدم لتمييزها بشارة "غير متزامن" بالواجهة)
+export async function getPendingIds(storeName) {
+  const items = await localDb.getAll('syncQueue');
+  return new Set(items.filter(i => i.storeName === storeName && i.payload).map(i => i.payload.id));
+}
+
+// الحالة الحالية للمزامنة عند فتح التطبيق أو تغيير الشاشة، قبل وصول أي حدث جديد
+export async function getSyncStatus() {
+  if (!navigator.onLine) return 'offline';
+  const pending = await getPendingCount();
+  return pending ? 'pending' : 'synced';
 }
 
 export async function flushQueue() {

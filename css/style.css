@@ -57,6 +57,11 @@ ul { margin: 0; padding: 0; list-style: none; }
   cursor: pointer;
 }
 .icon-btn:active { background: var(--bg); }
+#sync-status-btn.sync-synced { color: var(--success); }
+#sync-status-btn.sync-pending { color: var(--danger); }
+#sync-status-btn.sync-offline { color: var(--danger); }
+#sync-status-btn.sync-syncing { color: var(--warning); }
+#sync-status-btn.sync-syncing svg { animation: spin 1s linear infinite; }
 .back-btn { display:flex; align-items:center; gap:6px; font-weight:700; color: var(--primary-dark); background:none; border:none; font-size:15px; padding: 6px; cursor:pointer; }
 
 #app-content {
@@ -162,6 +167,7 @@ ul { margin: 0; padding: 0; list-style: none; }
 .badge.transfer { background: var(--blue-light); color: var(--blue); }
 .badge.debt { background: var(--danger-light); color: var(--danger); }
 .badge.partial { background: var(--warning-light); color: var(--warning); }
+.badge.unsynced { background: var(--danger-light); color: var(--danger); }
 
 .empty-state { text-align: center; padding: 40px 16px; color: var(--text-muted); }
 .empty-state svg { width: 48px; height: 48px; margin-bottom: 10px; opacity: .5; }

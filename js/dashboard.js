@@ -3,11 +3,12 @@ import { getTodayStats, getRecentSales, getSettings, getTotalOutstandingDebt } f
 import { getCurrentUser, canViewProfit } from './auth.js';
 import { formatMoney, todayLabel, formatTime, escapeHtml } from './utils.js';
 import { emptyState } from './ui.js';
+import { onSyncStatusChange, getPendingIds } from './sync.js';
 
 export async function renderDashboard(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
-  const [stats, sales, settings, user, totalDebt] = await Promise.all([
-    getTodayStats(), getRecentSales(10), getSettings(), getCurrentUser(), getTotalOutstandingDebt()
+  const [stats, sales, settings, user, totalDebt, pendingSaleIds] = await Promise.all([
+    getTodayStats(), getRecentSales(10), getSettings(), getCurrentUser(), getTotalOutstandingDebt(), getPendingIds('sales')
   ]);
   const showProfit = canViewProfit(user);
 
@@ -61,19 +62,32 @@ export async function renderDashboard(container) {
 
     <div class="section-title">آخر العمليات <span class="link" data-nav="#/reports">عرض الكل</span></div>
     <div class="card" style="padding:6px 10px;">
-      ${sales.length ? sales.map(saleRow).join('') : emptyState('🧾', 'لا توجد عمليات بيع بعد', 'ابدأ بتسجيل أول عملية بيع')}
+      ${sales.length ? sales.map(s => saleRow(s, pendingSaleIds)).join('') : emptyState('🧾', 'لا توجد عمليات بيع بعد', 'ابدأ بتسجيل أول عملية بيع')}
     </div>
   `;
 
   container.querySelector('#db-new-sale').onclick = () => window.location.hash = '#/sale/new';
   container.querySelectorAll('[data-nav]').forEach(el => el.onclick = () => window.location.hash = el.dataset.nav);
+
+  if (settings.backendMode === 'supabase') bindDashboardSyncRefresh(container);
 }
 
-function saleRow(sale) {
+// نعيد رسم اللوحة تلقائيًا عند تغيّر حالة المزامنة (مثلاً بعد رفع عمليات كانت محفوظة أوف لاين)
+// حتى تختفي شارة "غير متزامن" فورًا دون ما يحتاج المستخدم يعمل تحديث يدوي
+function bindDashboardSyncRefresh(container) {
+  const unsubscribe = onSyncStatusChange((status) => {
+    const onDashboard = !window.location.hash || window.location.hash === '#/' || window.location.hash === '#/dashboard';
+    if (!onDashboard) { unsubscribe(); return; }
+    if (status === 'synced') renderDashboard(container);
+  });
+}
+
+function saleRow(sale, pendingIds) {
   const methodBadge = sale.payment_status === 'paid'
     ? (sale.paid_transfer > 0 && sale.paid_cash === 0 ? 'transfer' : 'cash')
     : (sale.payment_status === 'debt' ? 'debt' : 'partial');
   const methodLabel = { cash: 'نقدي', transfer: 'تحويل', debt: 'دين', partial: 'مختلط' }[methodBadge];
+  const notSynced = pendingIds && pendingIds.has(sale.id);
   return `
     <div class="list-item" style="cursor:pointer;" data-nav="#/invoice/${sale.id}">
       <div class="avatar">${escapeHtml((sale.customer_name_snapshot || 'ز')[0])}</div>
@@ -83,7 +97,11 @@ function saleRow(sale) {
       </div>
       <div style="text-align:left;">
         <div class="amount">${formatMoney(sale.total_amount)}</div>
-        <div class="meta"><span class="badge ${methodBadge}">${methodLabel}</span> ${formatTime(sale.created_at)}</div>
+        <div class="meta">
+          <span class="badge ${methodBadge}">${methodLabel}</span>
+          ${notSynced ? '<span class="badge unsynced" title="محفوظة على الجهاز، بانتظار الرفع للخادم">⏳ غير متزامن</span>' : ''}
+          ${formatTime(sale.created_at)}
+        </div>
       </div>
     </div>`;
 }

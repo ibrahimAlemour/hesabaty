@@ -1,7 +1,7 @@
 // نقطة الدخول: التوجيه (Router) وهيكل الصفحة العام
 import { getSettings, updateSettings, pullFromRemote } from './database.js';
 import { isLoggedIn, getCurrentUser, refreshShopStatus, signOut } from './auth.js';
-import { initAutoSync, flushQueue } from './sync.js';
+import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus } from './sync.js';
 import * as remoteDb from './db-supabase.js';
 import { toastError } from './ui.js';
 import { renderSetupWizard } from './setup.js';
@@ -179,12 +179,37 @@ async function router() {
   navigate('#/dashboard');
 }
 
+const SYNC_ICON_TITLES = {
+  offline: 'غير متصل - العمليات محفوظة على الجهاز وسترفع تلقائيًا عند عودة الإنترنت',
+  pending: 'بانتظار المزامنة مع الخادم',
+  syncing: 'جاري المزامنة...',
+  synced: 'متصل ومتزامن بالكامل'
+};
+
+function applySyncIconStatus(status) {
+  const btn = document.getElementById('sync-status-btn');
+  if (!btn) return;
+  btn.classList.remove('sync-offline', 'sync-pending', 'sync-syncing', 'sync-synced');
+  btn.classList.add(`sync-${status}`);
+  btn.title = SYNC_ICON_TITLES[status] || '';
+}
+
+async function initSyncIndicator() {
+  const settings = await getSettings();
+  const btn = document.getElementById('sync-status-btn');
+  if (!btn) return;
+  if (settings.backendMode !== 'supabase') { btn.style.display = 'none'; return; }
+  applySyncIconStatus(await getSyncStatus());
+  onSyncStatusChange(applySyncIconStatus);
+}
+
 backBtn.addEventListener('click', () => window.history.back());
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
   buildNav();
   router();
   initAutoSync();
+  initSyncIndicator();
 });
 
 function iconSvg(name) {

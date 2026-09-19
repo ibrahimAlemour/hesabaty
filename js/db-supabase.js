@@ -117,6 +117,15 @@ export async function getSession() {
   return data.session;
 }
 
+// يجدد رمز الجلسة صراحة (لا يعتمد على مؤقّت التجديد التلقائي الداخلي لمكتبة سوبابيس، والذي قد لا يعمل
+// إذا بقي التطبيق بالخلفية لفترة طويلة على الجوال فتنتهي صلاحية الجلسة دون تجديد قبل أول طلب كتابة جديد)
+export async function refreshSession() {
+  if (!supabaseClient) return null;
+  const { data, error } = await supabaseClient.auth.refreshSession();
+  if (error) return null;
+  return data.session;
+}
+
 // جدول profiles: يربط مستخدم Supabase Auth بالاسم والدور (owner/cashier/super_admin) والمحل التابع له
 export async function getProfile(userId) {
   const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).maybeSingle();

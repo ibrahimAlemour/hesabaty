@@ -45,19 +45,26 @@ export async function getSyncStatus() {
 }
 
 // يعيد تهيئة عميل سوبابيس إذا لم يكن جاهزًا بعد (مثلاً لأن التطبيق فُتح أول مرة أوف لاين ولم تتحمّل مكتبة سوبابيس)
-// حتى لا تبقى العمليات عالقة للأبد بانتظار تهيئة كانت ستحدث فقط عند التنقل بين الشاشات
+// ثم يتأكد أن جلسة الدخول صالحة وغير منتهية قبل أي محاولة رفع.
+// السبب: مؤقّت التجديد التلقائي لمكتبة سوبابيس قد يتوقف عن العمل إذا بقي التطبيق بالخلفية على الجوال
+// لفترة طويلة (المتصفح يجمّد المؤقّتات بالخلفية)، فتنتهي صلاحية الجلسة دون تجديد، وأي طلب كتابة بعدها
+// يُرفض بصمت بسياسة RLS (Row Level Security) رغم أن المستخدم يبدو "مسجّل دخوله" بواجهة التطبيق
 async function ensureRemoteClient() {
-  if (remoteDb.getClient()) return true;
   try {
-    const settings = await localDb.getById('settings', 'app');
-    if (!settings || settings.backendMode !== 'supabase' || !settings.supabaseUrl || !settings.supabaseAnonKey) return false;
-    await remoteDb.loadSupabaseScript();
-    await remoteDb.initSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
-    // نستعيد الجلسة المحفوظة صراحة وننتظرها قبل أي طلب: عميل سوبابيس المُنشأ حديثًا يستعيد الجلسة من
-    // التخزين المحلي بشكل غير متزامن بالخلفية، فلو أرسلنا طلب كتابة فورًا بدون انتظار هذا قد يُرسل
-    // بدون هوية المستخدم (فقط anon key) فيُرفض بسياسة RLS رغم إنه فعليًا مسجّل دخوله
-    await remoteDb.getSession();
-    return !!remoteDb.getClient();
+    if (!remoteDb.getClient()) {
+      const settings = await localDb.getById('settings', 'app');
+      if (!settings || settings.backendMode !== 'supabase' || !settings.supabaseUrl || !settings.supabaseAnonKey) return false;
+      await remoteDb.loadSupabaseScript();
+      await remoteDb.initSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
+    }
+    if (!remoteDb.getClient()) return false;
+
+    let session = await remoteDb.getSession();
+    const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0;
+    if (!session || expiresAtMs < Date.now() + 60000) {
+      session = await remoteDb.refreshSession();
+    }
+    return !!session;
   } catch (e) {
     return false;
   }

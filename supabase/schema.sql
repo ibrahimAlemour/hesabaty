@@ -191,8 +191,15 @@ alter table expenses enable row level security;
 alter table cash_transactions enable row level security;
 alter table audit_log enable row level security;
 
+-- security definer + search_path ثابت: يمنع الاستدعاء الذاتي اللانهائي (infinite recursion)
+-- الذي يحدث لو نُفذ الاستعلام الداخلي تحت نفس سياسات RLS لجدول profiles (سياسة profiles_select تستدعي is_owner نفسها)
 create or replace function is_owner()
-returns boolean language sql stable as $$
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
   select exists (select 1 from profiles where id = auth.uid() and role = 'owner');
 $$;
 

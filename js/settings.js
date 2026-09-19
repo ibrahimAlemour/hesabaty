@@ -44,12 +44,9 @@ export async function renderSettings(container) {
       </div>
     </div>
 
-    ${canManage ? `
+    ${canManage && settings.backendMode !== 'supabase' ? `
     <div class="card">
       <div class="section-title" style="margin-top:0;">إدارة المستخدمين</div>
-      ${settings.backendMode === 'supabase' ? `
-      <p style="font-size:12.5px;color:var(--text-muted);">التطبيق متصل بسوبابيس الآن، فإضافة الحسابات تتم من لوحة Supabase مباشرة: Authentication → Add user، ثم أضف صفًا مطابقًا بجدول profiles بدور "cashier".</p>
-      ` : `
       <ul>
         ${(settings.users || []).map(u => `
           <li class="list-item">
@@ -59,8 +56,10 @@ export async function renderSettings(container) {
           </li>`).join('')}
       </ul>
       <button class="btn btn-secondary btn-block" id="st-add-cashier" style="margin-top:10px;">+ إضافة حساب كاشير</button>
-      `}
     </div>
+    ` : ''}
+
+    ${canManage ? `
 
     <div class="card">
       <div class="section-title" style="margin-top:0;">النسخ الاحتياطي</div>

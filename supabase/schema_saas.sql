@@ -338,6 +338,38 @@ alter table sales add constraint sales_invoice_number_shop_unique unique (shop_i
 
 alter table sales drop constraint if exists sales_invoice_number_shop_unique;
 
+-- ---------- 11) التصنيفات (categories) تصبح خاصة بكل محل بدل مشتركة بين الجميع ----------
+-- كانت التصنيفات مرجعًا مشتركًا (نفس الستة تصنيفات لكل المحلات، وتعديلها مسموح فقط للمدير العام).
+-- الآن كل محل يقدر يضيف/يعدّل/يحذف تصنيفاته الخاصة (والملصق التعبيري) من تطبيقه مباشرة، فلازم تُعزل تمامًا.
+
+alter table categories add column if not exists shop_id uuid references shops(id) on delete cascade;
+
+-- نكرر التصنيفات المشتركة الحالية كنسخة خاصة مستقلة لكل محل موجود بالفعل، ونعيد ربط منتجاته بنسخته الجديدة
+do $$
+declare
+  shop_row record;
+  cat_row record;
+  new_id text;
+begin
+  for shop_row in select id from shops loop
+    for cat_row in select id, name, icon from categories where shop_id is null loop
+      new_id := gen_random_uuid()::text;
+      insert into categories (id, name, icon, shop_id, created_at)
+        values (new_id, cat_row.name, cat_row.icon, shop_row.id, now());
+      update products set category_id = new_id
+        where shop_id = shop_row.id and category_id = cat_row.id;
+    end loop;
+  end loop;
+  delete from categories where shop_id is null;
+end $$;
+
+drop policy if exists categories_shared_select on categories;
+drop policy if exists categories_admin_write on categories;
+create policy categories_isolated_select on categories for select using (shop_id = my_shop_id() or is_super_admin());
+create policy categories_isolated_insert on categories for insert with check (shop_id = my_shop_id());
+create policy categories_isolated_update on categories for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy categories_isolated_delete on categories for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

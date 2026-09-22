@@ -6,12 +6,12 @@ import { toastError, toastSuccess, setLoading } from './ui.js';
 import { escapeHtml } from './utils.js';
 
 const SUGGESTED_PRODUCTS = [
-  { name: 'لحم بلدي', category_id: 'cat-meat', unit: 'كغ', cost_price: 35, selling_price: 45 },
-  { name: 'دجاج', category_id: 'cat-chicken', unit: 'كغ', cost_price: 14, selling_price: 18 },
-  { name: 'بندورة', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 2.5, selling_price: 4 },
-  { name: 'خيار', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 2, selling_price: 3.5 },
-  { name: 'بطاطا', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 2, selling_price: 3 },
-  { name: 'تفاح', category_id: 'cat-fruits', unit: 'كغ', cost_price: 5, selling_price: 8 }
+  { name: 'لحم بلدي', category_name: 'لحوم', unit: 'كغ', cost_price: 35, selling_price: 45 },
+  { name: 'دجاج', category_name: 'دجاج', unit: 'كغ', cost_price: 14, selling_price: 18 },
+  { name: 'بندورة', category_name: 'خضار', unit: 'كغ', cost_price: 2.5, selling_price: 4 },
+  { name: 'خيار', category_name: 'خضار', unit: 'كغ', cost_price: 2, selling_price: 3.5 },
+  { name: 'بطاطا', category_name: 'خضار', unit: 'كغ', cost_price: 2, selling_price: 3 },
+  { name: 'تفاح', category_name: 'فواكه', unit: 'كغ', cost_price: 5, selling_price: 8 }
 ];
 
 let state = { shopName: '', selectedProducts: new Set(SUGGESTED_PRODUCTS.map(p => p.name)), demoData: true };
@@ -112,9 +112,13 @@ function bindStep(container) {
     setLoading(finish, true, 'جاري الإنشاء...');
     try {
       await updateSettings({ shopName: state.shopName, currency: '₪' });
-      await ensureDefaultCategories();
+      const categories = await ensureDefaultCategories();
+      const catIdByName = new Map(categories.map(c => [c.name, c.id]));
       for (const p of SUGGESTED_PRODUCTS) {
-        if (state.selectedProducts.has(p.name)) await addProduct({ ...p, quick_access: true });
+        if (state.selectedProducts.has(p.name)) {
+          const { category_name, ...rest } = p;
+          await addProduct({ ...rest, category_id: catIdByName.get(category_name), quick_access: true });
+        }
       }
       await createOwnerAccount({ name, email, password: pass });
       if (state.demoData) await loadSeedData();

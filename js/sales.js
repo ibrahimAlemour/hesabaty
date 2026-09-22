@@ -13,9 +13,10 @@ function freshState() {
 export async function renderNewSale(container) {
   editingSaleId = null;
   saleState = freshState();
-  const [quickProducts, allProducts] = await Promise.all([db.getQuickProducts(10), db.getProducts({ activeOnly: true })]);
+  const [quickProducts, allProducts, categories] = await Promise.all([db.getQuickProducts(10), db.getProducts({ activeOnly: true }), db.getCategories()]);
   container._allProducts = allProducts;
   container._quickProducts = quickProducts;
+  container._categoryIcons = new Map(categories.map(c => [c.id, c.icon]));
   renderSaleScreen(container);
 }
 
@@ -23,11 +24,12 @@ export async function renderEditSale(container, saleId) {
   const sale = await db.getSale(saleId);
   if (!sale) return toastError('الفاتورة غير موجودة');
   editingSaleId = saleId;
-  const [quickProducts, allProducts, customer] = await Promise.all([
-    db.getQuickProducts(10), db.getProducts({ activeOnly: true }), db.getCustomer(sale.customer_id)
+  const [quickProducts, allProducts, customer, categories] = await Promise.all([
+    db.getQuickProducts(10), db.getProducts({ activeOnly: true }), db.getCustomer(sale.customer_id), db.getCategories()
   ]);
   container._allProducts = allProducts;
   container._quickProducts = quickProducts;
+  container._categoryIcons = new Map(categories.map(c => [c.id, c.icon]));
   saleState = {
     customer: customer || null,
     items: sale.items.map(it => ({ product_id: it.product_id, product_name: it.product_name, quantity: it.quantity, unit: it.unit, cost_price: fromCents(it.cost_price), selling_price: fromCents(it.selling_price) })),
@@ -59,7 +61,7 @@ function renderSaleScreen(container) {
     <div class="quick-grid" id="quick-products">
       ${container._quickProducts.map(p => `
         <div class="quick-btn" data-product-id="${p.id}">
-          <span class="emoji">${categoryEmoji(p.category_id)}</span>${escapeHtml(p.name)}
+          <span class="emoji">${categoryEmoji(p.category_id, container._categoryIcons)}</span>${escapeHtml(p.name)}
         </div>`).join('')}
       <div class="quick-btn" id="search-product-btn"><span class="emoji">🔍</span>بحث / أخرى</div>
     </div>
@@ -92,9 +94,8 @@ function renderSaleScreen(container) {
   bindSaleScreen(container);
 }
 
-function categoryEmoji(catId) {
-  const map = { 'cat-meat': '🥩', 'cat-chicken': '🍗', 'cat-vegetables': '🥬', 'cat-fruits': '🍎', 'cat-groceries': '🧂', 'cat-other': '📦' };
-  return map[catId] || '📦';
+function categoryEmoji(catId, iconsMap) {
+  return (iconsMap && iconsMap.get(catId)) || '📦';
 }
 
 function itemsTotal(items) {
@@ -241,7 +242,7 @@ function openProductSheet(container) {
     const list = container._allProducts.filter(p => fuzzyMatch(p.name, q));
     overlay.querySelector('#product-results').innerHTML = list.length ? list.map(p => `
       <div class="list-item" style="cursor:pointer;" data-pick="${p.id}">
-        <div class="avatar">${categoryEmoji(p.category_id)}</div>
+        <div class="avatar">${categoryEmoji(p.category_id, container._categoryIcons)}</div>
         <div class="info"><div class="title">${escapeHtml(p.name)}</div><div class="subtitle">${formatMoney(p.selling_price)} / ${p.unit}</div></div>
       </div>`).join('') : emptyState('🔍', 'لا توجد نتائج');
     overlay.querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {

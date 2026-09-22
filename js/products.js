@@ -26,11 +26,14 @@ function renderList(container, products) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="product-search" placeholder="ابحث عن منتج..." value="${escapeHtml(currentQuery)}">
     </div>
-    <div class="tabs">
-      <button class="tab-btn ${currentCategory === 'all' ? 'active' : ''}" data-cat="all">الكل</button>
-      ${categories.map(c => `<button class="tab-btn ${currentCategory === c.id ? 'active' : ''}" data-cat="${c.id}">${c.icon} ${c.name}</button>`).join('')}
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="tabs" style="flex:1;">
+        <button class="tab-btn ${currentCategory === 'all' ? 'active' : ''}" data-cat="all">الكل</button>
+        ${categories.map(c => `<button class="tab-btn ${currentCategory === c.id ? 'active' : ''}" data-cat="${c.id}">${c.icon} ${escapeHtml(c.name)}</button>`).join('')}
+      </div>
+      ${container._canManage ? `<button class="icon-btn" id="manage-categories-btn" title="إدارة التصنيفات" style="flex-shrink:0;border:1.5px solid var(--border);">⚙️</button>` : ''}
     </div>
-    <button class="btn btn-primary btn-block" id="add-product-btn" style="margin-bottom:14px;">+ إضافة منتج</button>
+    <button class="btn btn-primary btn-block" id="add-product-btn" style="margin-bottom:14px;margin-top:10px;">+ إضافة منتج</button>
     <div class="card" style="padding:6px 10px;">
       ${filtered.length ? filtered.map(p => productRow(p, categories)).join('') : emptyState('📦', 'لا توجد منتجات')}
     </div>
@@ -43,6 +46,84 @@ function renderList(container, products) {
     const p = products.find(x => x.id === el.dataset.edit);
     openProductForm(container, p, () => renderProductList(container));
   });
+  const manageCatBtn = container.querySelector('#manage-categories-btn');
+  if (manageCatBtn) manageCatBtn.onclick = () => openCategoryManagerSheet(container);
+}
+
+function openCategoryManagerSheet(container) {
+  const categories = container._categories;
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>إدارة التصنيفات</h3></div>
+    <div id="cat-manager-list">
+      ${categories.map(categoryManagerRow).join('')}
+    </div>
+    <button class="btn btn-primary btn-block" style="margin-top:10px;" id="cat-add-btn">+ إضافة تصنيف</button>
+  `);
+
+  overlay.querySelectorAll('[data-cat-edit]').forEach(btn => btn.onclick = () => {
+    const c = container._categories.find(x => x.id === btn.dataset.catEdit);
+    openCategoryForm(container, c, () => reopenCategoryManager(container));
+  });
+  overlay.querySelectorAll('[data-cat-delete]').forEach(btn => btn.onclick = async () => {
+    const c = container._categories.find(x => x.id === btn.dataset.catDelete);
+    const ok = await confirmDialog({ title: 'حذف تصنيف', message: `هل تريد حذف "${c.name}"؟` });
+    if (!ok) return;
+    try {
+      await db.deleteCategory(c.id);
+      toastSuccess('تم حذف التصنيف');
+      await reopenCategoryManager(container);
+    } catch (err) {
+      toastError(err.message || 'حدث خطأ أثناء الحذف');
+    }
+  });
+  overlay.querySelector('#cat-add-btn').onclick = () => openCategoryForm(container, null, () => reopenCategoryManager(container));
+}
+
+function categoryManagerRow(c) {
+  return `
+    <div class="list-item">
+      <div class="avatar">${escapeHtml(c.icon || '📦')}</div>
+      <div class="info"><div class="title">${escapeHtml(c.name)}</div></div>
+      <button class="icon-btn" data-cat-edit="${c.id}" title="تعديل"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+      <button class="remove-btn" data-cat-delete="${c.id}" title="حذف"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+    </div>`;
+}
+
+// بعد أي إضافة/تعديل/حذف تصنيف: نحدّث شاشة المنتجات (التبويبات تعتمد على قائمة التصنيفات) ونعيد فتح لوحة الإدارة
+async function reopenCategoryManager(container) {
+  await renderProductList(container);
+  openCategoryManagerSheet(container);
+}
+
+function openCategoryForm(container, category, onSaved) {
+  const isEdit = !!category;
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>${isEdit ? 'تعديل تصنيف' : '+ إضافة تصنيف'}</h3></div>
+    <div class="form-group"><label>اسم التصنيف</label><input type="text" id="cf-name" value="${isEdit ? escapeHtml(category.name) : ''}" placeholder="مثال: مشروبات"></div>
+    <div class="form-group">
+      <label>الملصق التعبيري (إيموجي)</label>
+      <input type="text" id="cf-icon" value="${isEdit ? escapeHtml(category.icon || '') : ''}" placeholder="📦" style="font-size:22px;text-align:center;" maxlength="4">
+      <p class="hint">اضغط زر الإيموجي 😊 بلوحة المفاتيح واختر أي ملصق يناسب التصنيف</p>
+    </div>
+    <button class="btn btn-primary btn-block" id="cf-save">${isEdit ? 'حفظ التعديلات' : 'إضافة التصنيف'}</button>
+  `, { onOpen: (el) => el.querySelector('#cf-name').focus() });
+
+  overlay.querySelector('#cf-save').onclick = async () => {
+    const btn = overlay.querySelector('#cf-save');
+    const name = overlay.querySelector('#cf-name').value.trim();
+    const icon = overlay.querySelector('#cf-icon').value.trim();
+    if (!name) return toastError('أدخل اسم التصنيف');
+    setLoading(btn, true, 'جاري الحفظ...');
+    try {
+      if (isEdit) await db.updateCategory(category.id, { name, icon }); else await db.addCategory({ name, icon });
+      closeSheet();
+      toastSuccess(isEdit ? 'تم تحديث التصنيف' : 'تم إضافة التصنيف');
+      onSaved();
+    } catch (err) {
+      toastError(err.message || 'حدث خطأ أثناء الحفظ');
+      setLoading(btn, false);
+    }
+  };
 }
 
 function productRow(p, categories) {

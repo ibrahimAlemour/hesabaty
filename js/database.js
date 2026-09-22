@@ -164,25 +164,63 @@ export async function getAuditLog(limit = 50) {
 }
 
 // ---------- التصنيفات ----------
+// كل محل له تصنيفاته الخاصة (معرّفات فريدة عالميًا)، حتى لا تتعارض مع تصنيفات محل آخر بجدول سوبابيس المشترك
 const DEFAULT_CATEGORIES = [
-  { id: 'cat-meat', name: 'لحوم', icon: '🥩' },
-  { id: 'cat-chicken', name: 'دجاج', icon: '🍗' },
-  { id: 'cat-vegetables', name: 'خضار', icon: '🥬' },
-  { id: 'cat-fruits', name: 'فواكه', icon: '🍎' },
-  { id: 'cat-groceries', name: 'مواد غذائية', icon: '🧂' },
-  { id: 'cat-other', name: 'أخرى', icon: '📦' }
+  { name: 'لحوم', icon: '🥩' },
+  { name: 'دجاج', icon: '🍗' },
+  { name: 'خضار', icon: '🥬' },
+  { name: 'فواكه', icon: '🍎' },
+  { name: 'مواد غذائية', icon: '🧂' },
+  { name: 'أخرى', icon: '📦' }
 ];
 
 export async function ensureDefaultCategories() {
   const existing = await localDb.getAll('categories');
   if (existing.length) return existing;
-  for (const c of DEFAULT_CATEGORIES) await writeRecord('categories', { ...c, created_at: nowISO() });
-  return DEFAULT_CATEGORIES;
+  const created = [];
+  for (const c of DEFAULT_CATEGORIES) {
+    const record = { id: uuid(), name: c.name, icon: c.icon, created_at: nowISO() };
+    await writeRecord('categories', record);
+    created.push(record);
+  }
+  return created;
 }
 
 export async function getCategories() {
   const rows = await localDb.getAll('categories');
   return rows.length ? rows : ensureDefaultCategories();
+}
+
+export async function addCategory({ name, icon }) {
+  if (!name || !name.trim()) throw new Error('أدخل اسم التصنيف');
+  const record = { id: uuid(), name: name.trim(), icon: icon || '📦', created_at: nowISO() };
+  await writeRecord('categories', record);
+  return record;
+}
+
+export async function updateCategory(id, { name, icon }) {
+  const existing = await localDb.getById('categories', id);
+  if (!existing) throw new Error('التصنيف غير موجود');
+  const updated = { ...existing, name: (name || '').trim() || existing.name, icon: icon || existing.icon };
+  await writeRecord('categories', updated);
+  return updated;
+}
+
+export async function deleteCategory(id) {
+  const products = await localDb.getAll('products');
+  if (products.some(p => p.category_id === id)) {
+    throw new Error('لا يمكن حذف هذا التصنيف لأنه مستخدم بمنتجات. غيّر تصنيف تلك المنتجات أولًا.');
+  }
+  await localDb.remove('categories', id);
+  const s = await getSettings();
+  if (s.backendMode === 'supabase' && s.currentShopId) {
+    if (navigator.onLine && remoteDb.getClient()) {
+      try { await remoteDb.remove('categories', id); }
+      catch (e) { await sync.enqueue('categories', 'remove', { id }); }
+    } else {
+      await sync.enqueue('categories', 'remove', { id });
+    }
+  }
 }
 
 // ---------- المنتجات ----------
@@ -208,7 +246,7 @@ export async function addProduct(data) {
   const record = {
     id: uuid(),
     name: data.name.trim(),
-    category_id: data.category_id || 'cat-other',
+    category_id: data.category_id || null,
     unit: data.unit || 'كغ',
     cost_price: toCents(data.cost_price),
     selling_price: toCents(data.selling_price),

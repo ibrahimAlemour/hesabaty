@@ -3,16 +3,16 @@ import * as db from './database.js';
 import { addDays } from './utils.js';
 
 const PRODUCTS = [
-  { name: 'لحم بلدي', category_id: 'cat-meat', unit: 'كغ', cost_price: 35, selling_price: 45, quick_access: true },
-  { name: 'لحم مفروم', category_id: 'cat-meat', unit: 'كغ', cost_price: 32, selling_price: 42, quick_access: true },
-  { name: 'دجاج', category_id: 'cat-chicken', unit: 'كغ', cost_price: 14, selling_price: 18, quick_access: true },
-  { name: 'بندورة', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 2.5, selling_price: 4, quick_access: true },
-  { name: 'خيار', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 2, selling_price: 3.5, quick_access: true },
-  { name: 'بطاطا', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 2, selling_price: 3, quick_access: true },
-  { name: 'بصل', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 1.5, selling_price: 2.5 },
-  { name: 'فلفل', category_id: 'cat-vegetables', unit: 'كغ', cost_price: 3, selling_price: 5 },
-  { name: 'تفاح', category_id: 'cat-fruits', unit: 'كغ', cost_price: 5, selling_price: 8 },
-  { name: 'موز', category_id: 'cat-fruits', unit: 'كغ', cost_price: 4, selling_price: 6.5 }
+  { name: 'لحم بلدي', category_name: 'لحوم', unit: 'كغ', cost_price: 35, selling_price: 45, quick_access: true },
+  { name: 'لحم مفروم', category_name: 'لحوم', unit: 'كغ', cost_price: 32, selling_price: 42, quick_access: true },
+  { name: 'دجاج', category_name: 'دجاج', unit: 'كغ', cost_price: 14, selling_price: 18, quick_access: true },
+  { name: 'بندورة', category_name: 'خضار', unit: 'كغ', cost_price: 2.5, selling_price: 4, quick_access: true },
+  { name: 'خيار', category_name: 'خضار', unit: 'كغ', cost_price: 2, selling_price: 3.5, quick_access: true },
+  { name: 'بطاطا', category_name: 'خضار', unit: 'كغ', cost_price: 2, selling_price: 3, quick_access: true },
+  { name: 'بصل', category_name: 'خضار', unit: 'كغ', cost_price: 1.5, selling_price: 2.5 },
+  { name: 'فلفل', category_name: 'خضار', unit: 'كغ', cost_price: 3, selling_price: 5 },
+  { name: 'تفاح', category_name: 'فواكه', unit: 'كغ', cost_price: 5, selling_price: 8 },
+  { name: 'موز', category_name: 'فواكه', unit: 'كغ', cost_price: 4, selling_price: 6.5 }
 ];
 
 const CUSTOMERS = [
@@ -32,10 +32,14 @@ export async function loadSeedData() {
   const settings = await db.getSettings();
   if (settings.seedLoaded) return;
 
-  await db.ensureDefaultCategories();
+  const categories = await db.ensureDefaultCategories();
+  const catIdByName = new Map(categories.map(c => [c.name, c.id]));
 
   const createdProducts = [];
-  for (const p of PRODUCTS) createdProducts.push(await db.addProduct(p));
+  for (const p of PRODUCTS) {
+    const { category_name, ...rest } = p;
+    createdProducts.push(await db.addProduct({ ...rest, category_id: catIdByName.get(category_name) }));
+  }
 
   const createdCustomers = [];
   for (const c of CUSTOMERS) createdCustomers.push(await db.addCustomer(c));

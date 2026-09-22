@@ -130,6 +130,16 @@ export async function pullFromRemote() {
     try {
       const rows = await remoteDb.getAll(storeName);
       if (rows.length) await localDb.bulkPut(storeName, rows);
+      // التصنيفات فقط: نحذف محليًا أي صف لم يعد موجودًا على الخادم (مثلاً بعد ترحيل SQL غيّر معرّفاتها)
+      // حتى لا تبقى نسخ قديمة معلّقة تظهر مكررة جنب نسخها الجديدة، دون التأثير على تصنيف أُضيف أوف لاين ولسا بانتظار الرفع
+      if (storeName === 'categories') {
+        const remoteIds = new Set(rows.map(r => r.id));
+        const pendingIds = new Set((await sync.getPendingItems()).filter(i => i.storeName === 'categories').map(i => i.payload?.id));
+        const localRows = await localDb.getAll('categories');
+        for (const local of localRows) {
+          if (!remoteIds.has(local.id) && !pendingIds.has(local.id)) await localDb.remove('categories', local.id);
+        }
+      }
     } catch (e) {
       console.error(`فشل سحب بيانات ${storeName} من سوبابيس`, e);
     }

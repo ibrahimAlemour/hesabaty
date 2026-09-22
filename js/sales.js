@@ -61,7 +61,7 @@ function renderSaleScreen(container) {
     <div class="quick-grid" id="quick-products">
       ${container._quickProducts.map(p => `
         <div class="quick-btn" data-product-id="${p.id}">
-          <span class="emoji">${categoryEmoji(p.category_id, container._categoryIcons)}</span>${escapeHtml(p.name)}
+          <span class="emoji">${productEmoji(p, container._categoryIcons)}</span>${escapeHtml(p.name)}
         </div>`).join('')}
       <div class="quick-btn" id="search-product-btn"><span class="emoji">🔍</span>بحث / أخرى</div>
     </div>
@@ -94,8 +94,8 @@ function renderSaleScreen(container) {
   bindSaleScreen(container);
 }
 
-function categoryEmoji(catId, iconsMap) {
-  return (iconsMap && iconsMap.get(catId)) || '📦';
+function productEmoji(p, iconsMap) {
+  return p.icon || (iconsMap && iconsMap.get(p.category_id)) || '📦';
 }
 
 function itemsTotal(items) {
@@ -242,7 +242,7 @@ function openProductSheet(container) {
     const list = container._allProducts.filter(p => fuzzyMatch(p.name, q));
     overlay.querySelector('#product-results').innerHTML = list.length ? list.map(p => `
       <div class="list-item" style="cursor:pointer;" data-pick="${p.id}">
-        <div class="avatar">${categoryEmoji(p.category_id, container._categoryIcons)}</div>
+        <div class="avatar">${productEmoji(p, container._categoryIcons)}</div>
         <div class="info"><div class="title">${escapeHtml(p.name)}</div><div class="subtitle">${formatMoney(p.selling_price)} / ${p.unit}</div></div>
       </div>`).join('') : emptyState('🔍', 'لا توجد نتائج');
     overlay.querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {

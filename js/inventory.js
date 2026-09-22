@@ -47,7 +47,7 @@ function itemRow(item, categories) {
   const sold = item.soldToday > 0;
   return `
     <div class="list-item">
-      <div class="avatar">${cat ? cat.icon : '📦'}</div>
+      <div class="avatar">${item.icon || (cat ? cat.icon : '📦')}</div>
       <div class="info">
         <div class="title">${escapeHtml(item.name)}</div>
         <div class="subtitle">${item.unit}</div>

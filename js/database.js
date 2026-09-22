@@ -718,7 +718,7 @@ export async function getInventorySoldToday() {
     }
   }
   return products
-    .map(p => ({ id: p.id, name: p.name, unit: p.unit, category_id: p.category_id, soldToday: soldMap.get(p.id) || 0 }))
+    .map(p => ({ id: p.id, name: p.name, unit: p.unit, category_id: p.category_id, icon: p.icon, soldToday: soldMap.get(p.id) || 0 }))
     .sort((a, b) => b.soldToday - a.soldToday || a.name.localeCompare(b.name, 'ar'));
 }
 

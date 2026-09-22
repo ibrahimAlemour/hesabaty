@@ -282,6 +282,18 @@ export async function updateCustomer(id, data) {
   const updated = { ...existing, ...data, updated_at: nowISO() };
   await writeRecord('customers', updated);
   await addAudit('customer', id, 'update', { before: existing, after: updated });
+
+  // اسم الزبون محفوظ كنسخة مستقلة (customer_name_snapshot) بكل فاتورة قديمة، فلما يتغير اسمه
+  // لازم نحدّث كل فواتيره السابقة كمان حتى يظهر بالاسم الجديد بالفواتير والداشبورد والتقارير
+  if (data.name && data.name !== existing.name) {
+    const sales = await localDb.getByIndex('sales', 'customer_id', id);
+    for (const sale of sales) {
+      if (sale.customer_name_snapshot !== updated.name) {
+        await writeRecord('sales', { ...sale, customer_name_snapshot: updated.name });
+      }
+    }
+  }
+
   return updated;
 }
 

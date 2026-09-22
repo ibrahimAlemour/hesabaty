@@ -643,6 +643,23 @@ export async function getTopProducts({ from, to, limit = 10 } = {}) {
   return Array.from(map.values()).sort((a, b) => b.sales - a.sales).slice(0, limit);
 }
 
+// المخزون: كل صنف نشط بالمحل مع كمية مبيعاته اليوم (0 لو ما بيع منه شي)، لمعرفة أكثر الأصناف حركة
+export async function getInventorySoldToday() {
+  const from = startOfDay(), to = endOfDay();
+  const [products, sales] = await Promise.all([getProducts({ activeOnly: true }), getSales({ from, to })]);
+  const soldMap = new Map();
+  for (const sale of sales) {
+    const items = await getSaleItems(sale.id);
+    for (const it of items) {
+      if (!it.product_id) continue;
+      soldMap.set(it.product_id, (soldMap.get(it.product_id) || 0) + it.quantity);
+    }
+  }
+  return products
+    .map(p => ({ id: p.id, name: p.name, unit: p.unit, category_id: p.category_id, soldToday: soldMap.get(p.id) || 0 }))
+    .sort((a, b) => b.soldToday - a.soldToday || a.name.localeCompare(b.name, 'ar'));
+}
+
 export async function getProfitByDay({ from, to }) {
   const sales = await getSales({ from, to });
   const dayMap = new Map();

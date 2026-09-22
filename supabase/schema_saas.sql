@@ -370,6 +370,9 @@ create policy categories_isolated_insert on categories for insert with check (sh
 create policy categories_isolated_update on categories for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
 create policy categories_isolated_delete on categories for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
 
+-- ---------- 12) رمز تعبيري مخصص اختياري لكل منتج (بدل الاعتماد فقط على رمز تصنيفه) ----------
+alter table products add column if not exists icon text;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

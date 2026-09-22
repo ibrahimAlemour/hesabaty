@@ -38,8 +38,8 @@ function customerRow(c) {
         <div class="subtitle">${c.phone || 'بدون رقم هاتف'}</div>
       </div>
       <div style="text-align:left;">
-        <div class="amount ${c.balance > 0 ? 'debt' : ''}">${c.balance > 0 ? formatMoney(c.balance) : '—'}</div>
-        <div class="meta">${c.balance > 0 ? 'عليه' : 'لا يوجد رصيد'}</div>
+        <div class="amount" style="${c.balance > 0 ? 'color:var(--danger);' : c.balance < 0 ? 'color:var(--success);' : ''}">${c.balance !== 0 ? formatMoney(Math.abs(c.balance)) : '—'}</div>
+        <div class="meta">${c.balance > 0 ? 'عليه' : c.balance < 0 ? 'له رصيد' : 'لا يوجد رصيد'}</div>
       </div>
     </div>`;
 }
@@ -88,8 +88,8 @@ export async function renderCustomerDetail(container, customerId) {
         </div>
       </div>
       <div class="balance-hero">
-        <div class="amount" style="${balance <= 0 ? 'color:var(--success);' : ''}">${formatMoney(Math.abs(balance))}</div>
-        <div class="label">${balance > 0 ? 'الرصيد المستحق على الزبون' : 'لا يوجد رصيد مستحق'}</div>
+        <div class="amount" style="${balance > 0 ? 'color:var(--danger);' : balance < 0 ? 'color:var(--success);' : 'color:var(--text-muted);'}">${formatMoney(Math.abs(balance))}</div>
+        <div class="label">${balance > 0 ? 'الرصيد المستحق على الزبون' : balance < 0 ? 'له رصيد (دفع مسبقًا أكثر من المطلوب)' : 'لا يوجد رصيد مستحق'}</div>
       </div>
       <button class="btn btn-primary btn-block" id="record-payment-btn">💵 تسجيل دفعة</button>
       ${canManage ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" id="edit-customer-btn">تعديل بيانات الزبون</button>

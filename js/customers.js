@@ -1,7 +1,7 @@
 // شاشات الزبائن: القائمة، إضافة، تفاصيل الحساب، تسجيل دفعة
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { formatMoney, formatDateTime, escapeHtml, fuzzyMatch, debounce, toCents } from './utils.js';
+import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, toCents } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
 
 export async function renderCustomerList(container) {
@@ -29,13 +29,25 @@ function renderList(container, customers, query) {
   container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
 }
 
+function cycleBadge(customer) {
+  const cycle = customer.payment_cycle && db.PAYMENT_CYCLES[customer.payment_cycle];
+  return cycle ? `<span class="badge" style="background:var(--blue-light);color:var(--blue);margin-right:6px;">🗓️ ${cycle.label}</span>` : '';
+}
+
+function dueDateNote(c) {
+  if (!c.dueDate) return '';
+  const overdue = new Date(c.dueDate) < new Date();
+  return `<div class="meta" style="${overdue ? 'color:var(--danger);font-weight:700;' : ''}">${overdue ? 'تجاوز موعد السداد' : 'السداد المتوقع'}: ${formatDate(c.dueDate)}</div>`;
+}
+
 function customerRow(c) {
   return `
     <div class="list-item" style="cursor:pointer;" data-open="${c.id}">
       <div class="avatar">${escapeHtml(c.name[0])}</div>
       <div class="info">
-        <div class="title">${escapeHtml(c.name)}</div>
+        <div class="title">${escapeHtml(c.name)} ${cycleBadge(c)}</div>
         <div class="subtitle">${c.phone || 'بدون رقم هاتف'}</div>
+        ${dueDateNote(c)}
       </div>
       <div style="text-align:left;">
         <div class="amount" style="${c.balance > 0 ? 'color:var(--danger);' : c.balance < 0 ? 'color:var(--success);' : ''}">${c.balance !== 0 ? formatMoney(Math.abs(c.balance)) : '—'}</div>
@@ -49,6 +61,15 @@ function openAddCustomerSheet(container, onSaved) {
     <div class="sheet-header"><h3>+ إضافة زبون</h3></div>
     <div class="form-group"><label>الاسم</label><input type="text" id="nc-name" placeholder="اسم الزبون"></div>
     <div class="form-group"><label>رقم الهاتف (اختياري)</label><input type="tel" id="nc-phone" placeholder="05xxxxxxxx"></div>
+    <div class="form-group">
+      <label>نظام السداد (اختياري)</label>
+      <select id="nc-cycle">
+        <option value="">بدون تحديد</option>
+        <option value="weekly">أسبوعي</option>
+        <option value="monthly">شهري</option>
+      </select>
+      <p class="hint">لتنظيم متابعة الديون وموعد السداد المتوقع لكل زبون</p>
+    </div>
     <div class="form-group"><label>ملاحظات (اختياري)</label><textarea id="nc-notes"></textarea></div>
     <button class="btn btn-primary btn-block" id="nc-save">حفظ</button>
   `, { onOpen: (el) => el.querySelector('#nc-name').focus() });
@@ -59,7 +80,10 @@ function openAddCustomerSheet(container, onSaved) {
     const btn = overlay.querySelector('#nc-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      const customer = await db.addCustomer({ name, phone: overlay.querySelector('#nc-phone').value.trim(), notes: overlay.querySelector('#nc-notes').value.trim() });
+      const customer = await db.addCustomer({
+        name, phone: overlay.querySelector('#nc-phone').value.trim(), notes: overlay.querySelector('#nc-notes').value.trim(),
+        payment_cycle: overlay.querySelector('#nc-cycle').value || null
+      });
       closeSheet();
       toastSuccess('تم إضافة الزبون');
       if (onSaved) onSaved(customer); else renderCustomerList(container);
@@ -77,19 +101,22 @@ export async function renderCustomerDetail(container, customerId) {
   ]);
   if (!customer) { container.innerHTML = `<div class="card">الزبون غير موجود</div>`; return; }
   const canManage = canDelete(user);
+  const dueDate = await db.getExpectedDueDate(customer, balance);
+  const overdue = dueDate && new Date(dueDate) < new Date();
 
   container.innerHTML = `
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
         <div class="avatar" style="width:48px;height:48px;font-size:18px;">${escapeHtml(customer.name[0])}</div>
         <div>
-          <div style="font-weight:800;font-size:16px;">${escapeHtml(customer.name)}</div>
+          <div style="font-weight:800;font-size:16px;">${escapeHtml(customer.name)} ${cycleBadge(customer)}</div>
           <div style="font-size:12.5px;color:var(--text-muted);">${customer.phone || 'بدون رقم هاتف'}</div>
         </div>
       </div>
       <div class="balance-hero">
         <div class="amount" style="${balance > 0 ? 'color:var(--danger);' : balance < 0 ? 'color:var(--success);' : 'color:var(--text-muted);'}">${formatMoney(Math.abs(balance))}</div>
         <div class="label">${balance > 0 ? 'الرصيد المستحق على الزبون' : balance < 0 ? 'له رصيد (دفع مسبقًا أكثر من المطلوب)' : 'لا يوجد رصيد مستحق'}</div>
+        ${dueDate ? `<div class="label" style="${overdue ? 'color:var(--danger);font-weight:700;' : ''}margin-top:4px;">${overdue ? '⚠️ تجاوز موعد السداد المتوقع' : 'موعد السداد المتوقع'}: ${formatDate(dueDate)}</div>` : ''}
       </div>
       <button class="btn btn-primary btn-block" id="record-payment-btn">💵 تسجيل دفعة</button>
       ${canManage ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" id="edit-customer-btn">تعديل بيانات الزبون</button>
@@ -188,6 +215,14 @@ function openEditCustomerSheet(customer, onSaved) {
     <div class="sheet-header"><h3>تعديل بيانات الزبون</h3></div>
     <div class="form-group"><label>الاسم</label><input type="text" id="ec-name" value="${escapeHtml(customer.name)}"></div>
     <div class="form-group"><label>رقم الهاتف</label><input type="tel" id="ec-phone" value="${escapeHtml(customer.phone || '')}"></div>
+    <div class="form-group">
+      <label>نظام السداد (اختياري)</label>
+      <select id="ec-cycle">
+        <option value="" ${!customer.payment_cycle ? 'selected' : ''}>بدون تحديد</option>
+        <option value="weekly" ${customer.payment_cycle === 'weekly' ? 'selected' : ''}>أسبوعي</option>
+        <option value="monthly" ${customer.payment_cycle === 'monthly' ? 'selected' : ''}>شهري</option>
+      </select>
+    </div>
     <div class="form-group"><label>ملاحظات</label><textarea id="ec-notes">${escapeHtml(customer.notes || '')}</textarea></div>
     <button class="btn btn-primary btn-block" id="ec-save">حفظ التعديلات</button>
   `);
@@ -197,7 +232,10 @@ function openEditCustomerSheet(customer, onSaved) {
     const btn = overlay.querySelector('#ec-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      await db.updateCustomer(customer.id, { name, phone: overlay.querySelector('#ec-phone').value.trim(), notes: overlay.querySelector('#ec-notes').value.trim() });
+      await db.updateCustomer(customer.id, {
+        name, phone: overlay.querySelector('#ec-phone').value.trim(), notes: overlay.querySelector('#ec-notes').value.trim(),
+        payment_cycle: overlay.querySelector('#ec-cycle').value || null
+      });
       closeSheet();
       toastSuccess('تم تحديث بيانات الزبون');
       onSaved();

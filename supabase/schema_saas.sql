@@ -373,6 +373,9 @@ create policy categories_isolated_delete on categories for delete using ((shop_i
 -- ---------- 12) رمز تعبيري مخصص اختياري لكل منتج (بدل الاعتماد فقط على رمز تصنيفه) ----------
 alter table products add column if not exists icon text;
 
+-- ---------- 13) نظام سداد الزبون (أسبوعي/شهري) لتنظيم متابعة الديون ----------
+alter table customers add column if not exists payment_cycle text;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

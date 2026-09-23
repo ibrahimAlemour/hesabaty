@@ -4,7 +4,7 @@
 import * as localDb from './db-indexeddb.js';
 import * as remoteDb from './db-supabase.js';
 import * as sync from './sync.js';
-import { uuid, nowISO, toCents, startOfDay, endOfDay } from './utils.js';
+import { uuid, nowISO, toCents, startOfDay, endOfDay, addDays } from './utils.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
 
 const SETTINGS_ID = 'app';
@@ -311,12 +311,16 @@ export async function getCustomer(id) {
   return localDb.getById('customers', id);
 }
 
+// نظام سداد الزبون: يحدد دورة تحصيل الدين المتوقعة لتنظيم متابعة الديون (اختياري، بدون تحديد افتراضيًا)
+export const PAYMENT_CYCLES = { weekly: { label: 'أسبوعي', days: 7 }, monthly: { label: 'شهري', days: 30 } };
+
 export async function addCustomer(data) {
   const record = {
     id: uuid(),
     name: data.name.trim(),
     phone: data.phone || '',
     notes: data.notes || '',
+    payment_cycle: data.payment_cycle || null,
     is_deleted: false,
     created_at: nowISO(),
     updated_at: nowISO()
@@ -366,9 +370,29 @@ export async function getCustomerBalance(customerId) {
   return debtTotal - paidTotal;
 }
 
+// آخر تاريخ فاتورة سجّلت دينًا على هذا الزبون (نقطة الانطلاق لحساب موعد السداد المتوقع)
+async function getLastDebtDate(customerId) {
+  const sales = (await localDb.getByIndex('sales', 'customer_id', customerId)).filter(s => !s.is_deleted && s.paid_debt > 0);
+  if (!sales.length) return null;
+  return sales.reduce((max, s) => (s.created_at > max ? s.created_at : max), sales[0].created_at);
+}
+
+// موعد السداد المتوقع = آخر فاتورة دين + دورة السداد المحددة للزبون (أسبوعي/شهري)، فقط لو عليه رصيد فعليًا
+export async function getExpectedDueDate(customer, balance) {
+  const cycle = customer.payment_cycle && PAYMENT_CYCLES[customer.payment_cycle];
+  if (!cycle || balance <= 0) return null;
+  const lastDebt = await getLastDebtDate(customer.id);
+  if (!lastDebt) return null;
+  return addDays(new Date(lastDebt), cycle.days).toISOString();
+}
+
 export async function getCustomersWithBalance() {
   const customers = await getCustomers();
-  const withBalance = await Promise.all(customers.map(async c => ({ ...c, balance: await getCustomerBalance(c.id) })));
+  const withBalance = await Promise.all(customers.map(async c => {
+    const balance = await getCustomerBalance(c.id);
+    const dueDate = await getExpectedDueDate(c, balance);
+    return { ...c, balance, dueDate };
+  }));
   return withBalance;
 }
 

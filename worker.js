@@ -184,14 +184,14 @@ async function processDueSmsSchedules(env) {
 
   for (const schedule of due) {
     try {
-      await processOneSchedule(schedule, svcHeaders);
+      await processOneSchedule(schedule, svcHeaders, env);
     } catch (e) {
       console.error('فشلت معالجة جدولة SMS', schedule.id, e);
     }
   }
 }
 
-async function processOneSchedule(schedule, svcHeaders) {
+async function processOneSchedule(schedule, svcHeaders, env) {
   const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/sms_templates?id=eq.${schedule.template_id}&select=*`, { headers: svcHeaders });
   const templates = await tplRes.json();
   const template = Array.isArray(templates) ? templates[0] : null;
@@ -217,7 +217,7 @@ async function processOneSchedule(schedule, svcHeaders) {
     if (!customer.phone) {
       result = { success: false, error: 'لا يوجد رقم هاتف لهذا الزبون' };
     } else {
-      result = await sendSms(customer.phone, message);
+      result = await sendSms(customer.phone, message, env);
     }
 
     await fetch(`${SUPABASE_URL}/rest/v1/sms_log`, {
@@ -291,9 +291,41 @@ async function markScheduleDone(schedule, svcHeaders) {
   }
 }
 
-// ---------- نقطة التكامل مع مزوّد SMS الفعلي (معلّقة إلى أن يتوفر حساب) ----------
-// لتفعيلها: أضف السرّين SMS_PROVIDER_URL و SMS_PROVIDER_API_KEY من إعدادات Cloudflare Workers،
-// واستبدل هذا الجسم باستدعاء API المزوّد الحقيقي (راجع تعليمات الربط المرسلة مع هذا التحديث)
-async function sendSms(phone, message) {
-  return { success: false, error: 'لم يتم ربط مزوّد SMS بعد - الرسالة جاهزة ومسجّلة بانتظار إكمال الربط' };
+// ---------- التكامل مع مزوّد TweetSMS (tweetsms.ps) ----------
+// المفتاح والمرسل يُقرآن من أسرار Cloudflare (SMS_PROVIDER_API_KEY / SMS_PROVIDER_SENDER) - لا يوجدان بالكود أبدًا
+// تنسيق الرد الدقيق من المزوّد غير موثّق هنا؛ نعتمد كشفًا مبدئيًا للنجاح/الفشل يُدقَّق فور وصول أول ردود فعلية بالسجل
+async function sendSms(phone, message, env) {
+  const apiKey = env.SMS_PROVIDER_API_KEY;
+  if (!apiKey) return { success: false, error: 'السرّ SMS_PROVIDER_API_KEY غير مضبوط على Cloudflare Workers' };
+
+  const normalizedPhone = normalizePalestinianPhone(phone);
+  if (!normalizedPhone) return { success: false, error: `رقم هاتف غير صالح: ${phone}` };
+
+  const params = new URLSearchParams({
+    comm: 'sendsms',
+    api_key: apiKey,
+    to: normalizedPhone,
+    message,
+    sender: env.SMS_PROVIDER_SENDER || 'TweetTEST'
+  });
+
+  try {
+    const res = await fetch(`https://tweetsms.ps/api.php?${params.toString()}`);
+    const text = (await res.text()).trim();
+    if (!res.ok) return { success: false, error: `فشل الاتصال بمزوّد SMS (HTTP ${res.status}): ${text.slice(0, 300)}` };
+    if (/error|fail|invalid|خطأ|فشل/i.test(text)) return { success: false, error: text.slice(0, 300) };
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: `تعذّر الاتصال بمزوّد SMS: ${e.message}` };
+  }
+}
+
+// يحوّل رقم الزبون المحلي (05xxxxxxxx أو +9705xxxxxxxx) إلى صيغة 9725xxxxxxxx التي يتوقعها TweetSMS
+function normalizePalestinianPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('972') && digits.length === 12) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return `972${digits.slice(1)}`;
+  if (digits.length === 9) return `972${digits}`; // بدون صفر بادئة
+  return null;
 }

@@ -794,7 +794,7 @@ export async function getSmsSchedules() {
   return rows.sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
 }
 
-export async function addSmsSchedule({ name, templateId, target, scheduledAt, recurring }) {
+export async function addSmsSchedule({ name, templateId, target, scheduledAt, recurring, excludedCustomerIds }) {
   if (!templateId) throw new Error('اختر قالب الرسالة');
   if (!scheduledAt) throw new Error('حدد تاريخ ووقت الإرسال');
   const record = {
@@ -805,6 +805,7 @@ export async function addSmsSchedule({ name, templateId, target, scheduledAt, re
     scheduled_at: scheduledAt,
     recurring: recurring || 'once', // once | weekly | monthly
     status: 'pending', // pending | completed | cancelled
+    excluded_customer_ids: excludedCustomerIds || [], // استثناء خاص بهذه الجدولة فقط (بالإضافة لاستثناء الزبون العام)
     created_at: nowISO()
   };
   await writeRecord('smsSchedules', record);

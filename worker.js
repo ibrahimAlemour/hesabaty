@@ -205,8 +205,10 @@ async function processOneSchedule(schedule, svcHeaders, env) {
   if (schedule.target !== 'all') custQuery += `&payment_cycle=eq.${schedule.target}`;
   const custRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?${custQuery}&select=*`, { headers: svcHeaders });
   const customers = await custRes.json();
+  const excludedIds = new Set(Array.isArray(schedule.excluded_customer_ids) ? schedule.excluded_customer_ids : []);
 
   for (const customer of (Array.isArray(customers) ? customers : [])) {
+    if (excludedIds.has(customer.id)) continue; // استثناء خاص بهذه الجدولة فقط
     const balance = await getCustomerBalanceRemote(customer.id, svcHeaders);
     if (balance <= 0) continue; // ما نبعت تذكير لزبون ما عليه دين حاليًا
 

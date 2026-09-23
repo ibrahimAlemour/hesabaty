@@ -433,6 +433,9 @@ create policy sms_schedules_isolated_delete on sms_schedules for delete using ((
 -- سجل الإرسال: يكتبه الخادم فقط (service_role يتجاوز RLS)، وصاحب المحل يقرأه فقط دون تعديل
 create policy sms_log_isolated_select on sms_log for select using (shop_id = my_shop_id() or is_super_admin());
 
+-- ---------- 15) استثناء زبائن محددين من جدولة SMS معيّنة بعينها (بالإضافة لاستثناء الزبون العام) ----------
+alter table sms_schedules add column if not exists excluded_customer_ids jsonb not null default '[]'::jsonb;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

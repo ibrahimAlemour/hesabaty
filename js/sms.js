@@ -160,6 +160,10 @@ function openScheduleForm(container, templates) {
         <option value="monthly">الزبائن الشهريين فقط</option>
       </select>
     </div>
+    <div class="form-group">
+      <label>الزبائن المستهدفون (فُك التحديد لاستثناء زبون من هذه الجدولة فقط)</label>
+      <div id="sch-customers-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:4px;"></div>
+    </div>
     <div class="form-group"><label>تاريخ ووقت الإرسال</label><input type="datetime-local" id="sch-datetime"></div>
     <div class="form-group"><label>التكرار</label>
       <select id="sch-recurring">
@@ -171,11 +175,28 @@ function openScheduleForm(container, templates) {
     <button class="btn btn-primary btn-block" id="sch-save">حفظ الجدولة</button>
   `);
 
+  const listEl = overlay.querySelector('#sch-customers-list');
+  const renderCustomerList = async (target) => {
+    listEl.innerHTML = `<p class="hint" style="padding:8px;">جاري التحميل...</p>`;
+    const customers = await db.getSmsTargetCustomers(target);
+    listEl.innerHTML = customers.length ? customers.map(c => `
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--border);">
+        <input type="checkbox" class="sch-cust-check" value="${c.id}" checked>
+        <span style="flex:1;">${escapeHtml(c.name)}</span>
+        <span class="meta">${db.formatMoneyPlain(c.balance)}</span>
+      </label>`).join('') : `<p class="hint" style="padding:8px;">لا يوجد زبائن بهذه الفئة عليهم دين حاليًا</p>`;
+  };
+
+  overlay.querySelector('#sch-target').onchange = (e) => renderCustomerList(e.target.value);
+  renderCustomerList('all');
+
   overlay.querySelector('#sch-save').onclick = async () => {
     const btn = overlay.querySelector('#sch-save');
     const dtValue = overlay.querySelector('#sch-datetime').value;
     if (!dtValue) return toastError('حدد تاريخ ووقت الإرسال');
     const scheduledAt = new Date(dtValue).toISOString();
+    const excludedCustomerIds = Array.from(overlay.querySelectorAll('.sch-cust-check'))
+      .filter(cb => !cb.checked).map(cb => cb.value);
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       await db.addSmsSchedule({
@@ -183,7 +204,8 @@ function openScheduleForm(container, templates) {
         templateId: overlay.querySelector('#sch-template').value,
         target: overlay.querySelector('#sch-target').value,
         scheduledAt,
-        recurring: overlay.querySelector('#sch-recurring').value
+        recurring: overlay.querySelector('#sch-recurring').value,
+        excludedCustomerIds
       });
       closeSheet();
       toastSuccess('تم حفظ الجدولة');

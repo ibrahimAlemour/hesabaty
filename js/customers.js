@@ -119,6 +119,7 @@ export async function renderCustomerDetail(container, customerId) {
         ${dueDate ? `<div class="label" style="${overdue ? 'color:var(--danger);font-weight:700;' : ''}margin-top:4px;">${overdue ? '⚠️ تجاوز موعد السداد المتوقع' : 'موعد السداد المتوقع'}: ${formatDate(dueDate)}</div>` : ''}
       </div>
       <button class="btn btn-primary btn-block" id="record-payment-btn">💵 تسجيل دفعة</button>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" id="add-charge-btn">📝 إضافة دين (بدون منتجات)</button>
       ${canManage ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" id="edit-customer-btn">تعديل بيانات الزبون</button>
       <button class="btn btn-danger btn-block" style="margin-top:8px;" id="delete-customer-btn">حذف الزبون</button>` : ''}
     </div>
@@ -130,6 +131,7 @@ export async function renderCustomerDetail(container, customerId) {
   `;
 
   container.querySelector('#record-payment-btn').onclick = () => openRecordPaymentSheet(customer, balance, () => renderCustomerDetail(container, customerId));
+  container.querySelector('#add-charge-btn').onclick = () => openAddChargeSheet(customer, () => renderCustomerDetail(container, customerId));
 
   if (canManage) {
     container.querySelector('#edit-customer-btn').onclick = () => openEditCustomerSheet(customer, () => renderCustomerDetail(container, customerId));
@@ -205,6 +207,35 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
       if (onDone) onDone();
     } catch (err) {
       toastError(err.message || 'حدث خطأ أثناء حفظ الدفعة. حاول مرة أخرى.');
+      setLoading(btn, false);
+    }
+  };
+}
+
+function openAddChargeSheet(customer, onDone) {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>إضافة دين - ${escapeHtml(customer.name)}</h3></div>
+    <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">لتسجيل دين بمبلغ مباشر بدون اختيار منتجات (مثلاً رسوم أو تسوية دين).</p>
+    <div class="form-group"><label>المبلغ</label><input type="number" id="charge-amount" step="0.5" min="0" placeholder="0"></div>
+    <div class="form-group"><label>ملاحظات (اختياري)</label><textarea id="charge-notes" placeholder="سبب الدين"></textarea></div>
+    <button class="btn btn-primary btn-block" id="charge-save">حفظ</button>
+  `, { onOpen: (el) => el.querySelector('#charge-amount').focus() });
+
+  overlay.querySelector('#charge-save').onclick = async () => {
+    const btn = overlay.querySelector('#charge-save');
+    const amount = parseFloat(overlay.querySelector('#charge-amount').value);
+    if (!amount || amount <= 0) return toastError('أدخل مبلغًا صحيحًا');
+    setLoading(btn, true, 'جاري الحفظ...');
+    try {
+      await db.addManualDebtCharge({
+        customerId: customer.id, customerName: customer.name, amount,
+        notes: overlay.querySelector('#charge-notes').value.trim()
+      });
+      closeSheet();
+      toastSuccess('تم تسجيل الدين على الزبون');
+      if (onDone) onDone();
+    } catch (err) {
+      toastError(err.message || 'حدث خطأ أثناء الحفظ. حاول مرة أخرى.');
       setLoading(btn, false);
     }
   };

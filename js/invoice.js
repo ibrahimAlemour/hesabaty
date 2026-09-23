@@ -22,12 +22,14 @@ export async function renderInvoice(container, saleId) {
         <span>${formatDateTime(sale.created_at)}</span>
       </div>
       <div style="font-weight:700;margin-bottom:10px;">الزبون: ${escapeHtml(sale.customer_name_snapshot || 'زبون بدون اسم')}</div>
+      ${sale.items.length ? `
       <table class="simple-table">
         <thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
         <tbody>
           ${sale.items.map(it => `<tr><td>${escapeHtml(it.product_name)}</td><td>${it.quantity} ${it.unit}</td><td>${formatMoney(it.selling_price)}</td><td>${formatMoney(it.total_price)}</td></tr>`).join('')}
         </tbody>
       </table>
+      ` : `<p style="font-size:13px;color:var(--text-muted);">دين مباشر بدون منتجات</p>`}
       <div class="totals-box">
         <div class="row grand"><span>الإجمالي</span><span>${formatMoney(sale.total_amount)}</span></div>
       </div>
@@ -47,8 +49,8 @@ export async function renderInvoice(container, saleId) {
       <button class="btn btn-secondary" id="inv-pdf">📄 PDF</button>
     </div>
     ${canManage ? `
-    <div class="no-print" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      <button class="btn btn-outline" id="inv-edit">تعديل الفاتورة</button>
+    <div class="no-print" style="display:grid;grid-template-columns:${sale.items.length ? '1fr 1fr' : '1fr'};gap:8px;">
+      ${sale.items.length ? `<button class="btn btn-outline" id="inv-edit">تعديل الفاتورة</button>` : ''}
       <button class="btn btn-danger" id="inv-delete">حذف الفاتورة</button>
     </div>` : ''}
   `;
@@ -61,7 +63,8 @@ export async function renderInvoice(container, saleId) {
   container.querySelector('#inv-share').onclick = () => shareInvoice(sale, settings);
 
   if (canManage) {
-    container.querySelector('#inv-edit').onclick = () => window.location.hash = `#/sale/edit/${sale.id}`;
+    const editBtn = container.querySelector('#inv-edit');
+    if (editBtn) editBtn.onclick = () => window.location.hash = `#/sale/edit/${sale.id}`;
     container.querySelector('#inv-delete').onclick = async () => {
       const ok = await confirmDialog({ title: 'حذف الفاتورة', message: `سيتم حذف فاتورة ${sale.invoice_number} وستتأثر أرصدة الزبون والصندوق.` });
       if (!ok) return;

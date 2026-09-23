@@ -448,6 +448,40 @@ function computeSaleTotals(items) {
   return { normalizedItems, subtotal, totalCost, totalProfit };
 }
 
+// فاتورة دين مباشرة بمبلغ فقط بدون منتجات (مثلاً رسوم خدمة أو تسوية دين يدوية)
+// تُسجَّل كفاتورة عادية بدون أصناف، فتظهر بسجل حركات الزبون والتقارير بنفس طريقة أي فاتورة أخرى
+export async function addManualDebtCharge({ customerId, customerName, amount, notes, createdAt }) {
+  return withInvoiceLock(async () => {
+    if (!customerId) throw new Error('يجب اختيار زبون');
+    const amountCents = toCents(amount);
+    if (amountCents <= 0) throw new Error('أدخل مبلغًا صحيحًا');
+
+    const { number, label } = await nextInvoiceLabel();
+    const createdAtFinal = createdAt || nowISO();
+
+    const sale = {
+      id: uuid(),
+      invoice_number: label,
+      invoice_seq: number,
+      customer_id: customerId,
+      customer_name_snapshot: customerName || 'زبون بدون اسم',
+      subtotal: amountCents, total_cost: 0, total_profit: 0, total_amount: amountCents,
+      paid_cash: 0, paid_transfer: 0, paid_debt: amountCents,
+      transfer_reference: '', transfer_bank: '',
+      payment_status: 'debt',
+      notes: notes || '',
+      is_deleted: false,
+      created_by: (await getSettings()).currentUser?.name || 'مستخدم محلي',
+      created_at: createdAtFinal,
+      updated_at: createdAtFinal,
+      edit_history: []
+    };
+    await writeRecord('sales', sale);
+    await addAudit('sale', sale.id, 'create', sale);
+    return sale;
+  });
+}
+
 export async function createSale(payload) {
   return withInvoiceLock(async () => {
     if (!payload.items || !payload.items.length) throw new Error('أضف منتجًا واحدًا على الأقل');

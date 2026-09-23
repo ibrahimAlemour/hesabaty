@@ -1,11 +1,12 @@
 // طبقة تخزين محلية باستخدام IndexedDB
 // تعرض واجهة عامة: getAll, get, put, remove, query, clear لكل مخزن (store)
 const DB_NAME = 'hesabaty-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 export const STORES = [
   'settings', 'customers', 'categories', 'products',
   'sales', 'saleItems', 'payments', 'expenses',
-  'cashTransactions', 'auditLog', 'syncQueue'
+  'cashTransactions', 'auditLog', 'syncQueue',
+  'smsTemplates', 'smsSchedules', 'smsLog'
 ];
 
 let dbPromise = null;
@@ -56,6 +57,18 @@ function openDatabase() {
       }
       if (!db.objectStoreNames.contains('syncQueue')) {
         db.createObjectStore('syncQueue', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('smsTemplates')) {
+        db.createObjectStore('smsTemplates', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('smsSchedules')) {
+        const s = db.createObjectStore('smsSchedules', { keyPath: 'id' });
+        s.createIndex('status', 'status');
+      }
+      if (!db.objectStoreNames.contains('smsLog')) {
+        const s = db.createObjectStore('smsLog', { keyPath: 'id' });
+        s.createIndex('created_at', 'created_at');
+        s.createIndex('schedule_id', 'schedule_id');
       }
     };
     req.onsuccess = () => resolve(req.result);

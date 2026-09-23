@@ -31,7 +31,9 @@ function renderList(container, customers, query) {
 
 function cycleBadge(customer) {
   const cycle = customer.payment_cycle && db.PAYMENT_CYCLES[customer.payment_cycle];
-  return cycle ? `<span class="badge" style="background:var(--blue-light);color:var(--blue);margin-right:6px;">🗓️ ${cycle.label}</span>` : '';
+  const cyclePart = cycle ? `<span class="badge" style="background:var(--blue-light);color:var(--blue);margin-right:6px;">🗓️ ${cycle.label}</span>` : '';
+  const smsPart = customer.sms_excluded ? `<span class="badge" style="background:var(--border);color:var(--text-muted);margin-right:6px;">🔕 مستثنى من SMS</span>` : '';
+  return cyclePart + smsPart;
 }
 
 function dueDateNote(c) {
@@ -255,6 +257,9 @@ function openEditCustomerSheet(customer, onSaved) {
       </select>
     </div>
     <div class="form-group"><label>ملاحظات</label><textarea id="ec-notes">${escapeHtml(customer.notes || '')}</textarea></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:16px;">
+      <input type="checkbox" id="ec-sms-excluded" ${customer.sms_excluded ? 'checked' : ''}> استثناء هذا الزبون من رسائل SMS التذكيرية
+    </label>
     <button class="btn btn-primary btn-block" id="ec-save">حفظ التعديلات</button>
   `);
   overlay.querySelector('#ec-save').onclick = async () => {
@@ -265,7 +270,8 @@ function openEditCustomerSheet(customer, onSaved) {
     try {
       await db.updateCustomer(customer.id, {
         name, phone: overlay.querySelector('#ec-phone').value.trim(), notes: overlay.querySelector('#ec-notes').value.trim(),
-        payment_cycle: overlay.querySelector('#ec-cycle').value || null
+        payment_cycle: overlay.querySelector('#ec-cycle').value || null,
+        sms_excluded: overlay.querySelector('#ec-sms-excluded').checked
       });
       closeSheet();
       toastSuccess('تم تحديث بيانات الزبون');

@@ -16,6 +16,9 @@ const TABLE_MAP = {
   expenses: 'expenses',
   cashTransactions: 'cash_transactions',
   auditLog: 'audit_log',
+  smsTemplates: 'sms_templates',
+  smsSchedules: 'sms_schedules',
+  smsLog: 'sms_log',
   syncQueue: null // قائمة المزامنة تبقى محلية دائمًا ولا تُرفع لسوبابيس
 };
 

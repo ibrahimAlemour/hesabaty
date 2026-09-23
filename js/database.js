@@ -121,7 +121,7 @@ async function writeRecord(storeName, record) {
 
 // يسحب كل بيانات المحل من سوبابيس ويحدّث النسخة المحلية (IndexedDB) - يُستدعى بعد تسجيل الدخول وعند بدء التطبيق
 // بذلك يمكن رؤية نفس البيانات من أي جهاز جديد يسجّل دخوله بنفس الحساب
-const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog'];
+const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog', 'smsTemplates', 'smsSchedules', 'smsLog'];
 export async function pullFromRemote() {
   const s = await getSettings();
   if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
@@ -216,21 +216,26 @@ export async function updateCategory(id, { name, icon }) {
   return updated;
 }
 
+// حذف موحّد: يحذف محليًا فورًا، ويرفع الحذف لسوبابيس إن كان متصلًا الآن أو يضيفه لطابور المزامنة لاحقًا
+async function removeRecord(storeName, id) {
+  await localDb.remove(storeName, id);
+  const s = await getSettings();
+  if (s.backendMode === 'supabase' && s.currentShopId) {
+    if (navigator.onLine && remoteDb.getClient()) {
+      try { await remoteDb.remove(storeName, id); }
+      catch (e) { await sync.enqueue(storeName, 'remove', { id }); }
+    } else {
+      await sync.enqueue(storeName, 'remove', { id });
+    }
+  }
+}
+
 export async function deleteCategory(id) {
   const products = await localDb.getAll('products');
   if (products.some(p => p.category_id === id)) {
     throw new Error('لا يمكن حذف هذا التصنيف لأنه مستخدم بمنتجات. غيّر تصنيف تلك المنتجات أولًا.');
   }
-  await localDb.remove('categories', id);
-  const s = await getSettings();
-  if (s.backendMode === 'supabase' && s.currentShopId) {
-    if (navigator.onLine && remoteDb.getClient()) {
-      try { await remoteDb.remove('categories', id); }
-      catch (e) { await sync.enqueue('categories', 'remove', { id }); }
-    } else {
-      await sync.enqueue('categories', 'remove', { id });
-    }
-  }
+  await removeRecord('categories', id);
 }
 
 // ---------- المنتجات ----------
@@ -321,6 +326,7 @@ export async function addCustomer(data) {
     phone: data.phone || '',
     notes: data.notes || '',
     payment_cycle: data.payment_cycle || null,
+    sms_excluded: !!data.sms_excluded,
     is_deleted: false,
     created_at: nowISO(),
     updated_at: nowISO()
@@ -723,6 +729,113 @@ export async function getCashSummary({ from, to } = {}) {
     opening, cashSales, transferSales, debtSales, cashPayments, transferPayments, totalExpenses,
     expectedCash, totalCash: cashSales + cashPayments, totalTransfer: transferSales + transferPayments
   };
+}
+
+// ---------- رسائل SMS: قوالب، جدولة، سجل ----------
+// تنبيه أمني/معماري: التطبيق (متصفح) لا يبعت SMS مباشرة أبدًا - ما في مكان آمن لحفظ مفتاح مزوّد SMS هنا.
+// هذا الملف يدير فقط البيانات (القوالب/الجدولات/السجل)، والإرسال الفعلي يتم من Worker بالخادم
+// (انظر worker.js: scheduled()) الذي يفحص الجدولات المستحقة دوريًا ويستخدم مفتاح المزوّد السري، ثم يكتب النتيجة بسجل الإرسال.
+// لذلك ميزة الجدولة التلقائية تعمل فقط بوضع SaaS (سوبابيس) - في الوضع المحلي البحت ما يوجد خادم يشغّلها.
+
+export const SMS_PLACEHOLDERS = ['{name}', '{amount}', '{due_date}', '{shop_name}'];
+
+export function formatMoneyPlain(cents) {
+  return `${((cents || 0) / 100).toFixed(2)} ₪`;
+}
+
+export function formatDatePlain(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+
+// يستبدل placeholders بالقيم الفعلية - نفس المنطق مكرّر بـ worker.js (بدون وحدات ES مشتركة بين البيئتين)
+export function renderSmsTemplate(body, { customerName, balanceCents, dueDate, shopName }) {
+  return (body || '')
+    .split('{name}').join(customerName || '')
+    .split('{amount}').join(formatMoneyPlain(balanceCents))
+    .split('{due_date}').join(formatDatePlain(dueDate))
+    .split('{shop_name}').join(shopName || '');
+}
+
+export async function getSmsTemplates() {
+  const rows = await localDb.getAll('smsTemplates');
+  return rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+}
+
+export async function addSmsTemplate({ name, body }) {
+  if (!name || !name.trim()) throw new Error('أدخل اسم القالب');
+  if (!body || !body.trim()) throw new Error('أدخل نص الرسالة');
+  const record = { id: uuid(), name: name.trim(), body: body.trim(), created_at: nowISO(), updated_at: nowISO() };
+  await writeRecord('smsTemplates', record);
+  return record;
+}
+
+export async function updateSmsTemplate(id, { name, body }) {
+  const existing = await localDb.getById('smsTemplates', id);
+  if (!existing) throw new Error('القالب غير موجود');
+  if (!name || !name.trim()) throw new Error('أدخل اسم القالب');
+  if (!body || !body.trim()) throw new Error('أدخل نص الرسالة');
+  const updated = { ...existing, name: name.trim(), body: body.trim(), updated_at: nowISO() };
+  await writeRecord('smsTemplates', updated);
+  return updated;
+}
+
+export async function deleteSmsTemplate(id) {
+  const schedules = await localDb.getAll('smsSchedules');
+  if (schedules.some(s => s.template_id === id && s.status === 'pending')) {
+    throw new Error('لا يمكن حذف قالب مستخدم بجدولة قائمة. أوقف أو احذف تلك الجدولة أولًا.');
+  }
+  await removeRecord('smsTemplates', id);
+}
+
+export async function getSmsSchedules() {
+  const rows = await localDb.getAll('smsSchedules');
+  return rows.sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
+}
+
+export async function addSmsSchedule({ name, templateId, target, scheduledAt, recurring }) {
+  if (!templateId) throw new Error('اختر قالب الرسالة');
+  if (!scheduledAt) throw new Error('حدد تاريخ ووقت الإرسال');
+  const record = {
+    id: uuid(),
+    name: name || '',
+    template_id: templateId,
+    target: target || 'all', // all | weekly | monthly
+    scheduled_at: scheduledAt,
+    recurring: recurring || 'once', // once | weekly | monthly
+    status: 'pending', // pending | completed | cancelled
+    created_at: nowISO()
+  };
+  await writeRecord('smsSchedules', record);
+  return record;
+}
+
+export async function cancelSmsSchedule(id) {
+  const existing = await localDb.getById('smsSchedules', id);
+  if (!existing) return;
+  await writeRecord('smsSchedules', { ...existing, status: 'cancelled' });
+}
+
+export async function deleteSmsSchedule(id) {
+  await removeRecord('smsSchedules', id);
+}
+
+// الزبائن المستهدفون بجدولة معيّنة: حسب تصنيف الدفع، باستثناء من فعّل استثناءه من الرسائل
+export async function getSmsTargetCustomers(target) {
+  const withBalance = await getCustomersWithBalance();
+  return withBalance
+    .filter(c => !c.sms_excluded)
+    .filter(c => target === 'all' || c.payment_cycle === target);
+}
+
+export async function toggleCustomerSmsExclusion(customerId, excluded) {
+  return updateCustomer(customerId, { sms_excluded: !!excluded });
+}
+
+export async function getSmsLog(limit = 200) {
+  const rows = await localDb.getAll('smsLog');
+  return rows.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit);
 }
 
 // ---------- التقارير ----------

@@ -12,6 +12,7 @@ import { renderCustomerList, renderCustomerDetail } from './customers.js';
 import { renderProductList } from './products.js';
 import { renderInventory } from './inventory.js';
 import { renderCategories } from './categories.js';
+import { renderSms } from './sms.js';
 import { renderTransfers } from './transfers.js';
 import { renderExpenses } from './expenses.js';
 import { renderCash } from './cash.js';
@@ -39,6 +40,7 @@ const MORE_ITEMS = [
   { path: '#/inventory', label: 'المخزون', icon: '📋' },
   { path: '#/categories', label: 'التصنيفات', icon: '🏷️' },
   { path: '#/debts', label: 'الديون', icon: '💳' },
+  { path: '#/sms', label: 'رسائل SMS', icon: '✉️' },
   { path: '#/transfers', label: 'التحويلات', icon: '📱' },
   { path: '#/expenses', label: 'المصروفات', icon: '💸' },
   { path: '#/cash', label: 'الصندوق', icon: '💰' },
@@ -55,6 +57,7 @@ const ROUTES = [
   { pattern: /^#\/inventory$/, title: 'المخزون', showBack: true, render: () => renderInventory(appContent) },
   { pattern: /^#\/categories$/, title: 'التصنيفات', showBack: true, render: () => renderCategories(appContent) },
   { pattern: /^#\/debts$/, title: 'الديون', showBack: true, render: () => renderDebts(appContent) },
+  { pattern: /^#\/sms$/, title: 'رسائل SMS', showBack: true, render: () => renderSms(appContent) },
   { pattern: /^#\/transfers$/, title: 'التحويلات', showBack: true, render: () => renderTransfers(appContent) },
   { pattern: /^#\/expenses$/, title: 'المصروفات', showBack: true, render: () => renderExpenses(appContent) },
   { pattern: /^#\/cash$/, title: 'الصندوق', showBack: true, render: () => renderCash(appContent) },

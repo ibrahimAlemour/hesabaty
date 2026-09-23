@@ -376,6 +376,63 @@ alter table products add column if not exists icon text;
 -- ---------- 13) نظام سداد الزبون (أسبوعي/شهري) لتنظيم متابعة الديون ----------
 alter table customers add column if not exists payment_cycle text;
 
+-- ---------- 14) نظام رسائل SMS: قوالب، جدولة، سجل، واستثناء الزبون ----------
+-- الإرسال الفعلي يتم من Worker بالخادم (cron trigger) لا من المتصفح - راجع worker.js: scheduled()
+alter table customers add column if not exists sms_excluded boolean not null default false;
+
+create table if not exists sms_templates (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  name text not null,
+  body text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists sms_schedules (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  name text,
+  template_id uuid not null references sms_templates(id) on delete restrict,
+  target text not null default 'all', -- all | weekly | monthly
+  scheduled_at timestamptz not null,
+  recurring text not null default 'once', -- once | weekly | monthly
+  status text not null default 'pending', -- pending | completed | cancelled
+  created_at timestamptz not null default now()
+);
+
+create table if not exists sms_log (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  schedule_id uuid references sms_schedules(id) on delete set null,
+  customer_id uuid references customers(id) on delete set null,
+  customer_name text,
+  phone text,
+  message text,
+  scheduled_at timestamptz,
+  sent_at timestamptz,
+  status text not null default 'pending', -- pending | sent | failed
+  error text,
+  created_at timestamptz not null default now()
+);
+
+alter table sms_templates enable row level security;
+alter table sms_schedules enable row level security;
+alter table sms_log enable row level security;
+
+create policy sms_templates_isolated_select on sms_templates for select using (shop_id = my_shop_id() or is_super_admin());
+create policy sms_templates_isolated_insert on sms_templates for insert with check (shop_id = my_shop_id());
+create policy sms_templates_isolated_update on sms_templates for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy sms_templates_isolated_delete on sms_templates for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+create policy sms_schedules_isolated_select on sms_schedules for select using (shop_id = my_shop_id() or is_super_admin());
+create policy sms_schedules_isolated_insert on sms_schedules for insert with check (shop_id = my_shop_id());
+create policy sms_schedules_isolated_update on sms_schedules for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy sms_schedules_isolated_delete on sms_schedules for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+-- سجل الإرسال: يكتبه الخادم فقط (service_role يتجاوز RLS)، وصاحب المحل يقرأه فقط دون تعديل
+create policy sms_log_isolated_select on sms_log for select using (shop_id = my_shop_id() or is_super_admin());
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

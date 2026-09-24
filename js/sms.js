@@ -27,20 +27,20 @@ export async function renderSms(container) {
       <p style="font-size:12.5px;color:var(--warning);margin:0;">⚠️ الجدولة التلقائية تحتاج اتصال سوبابيس (وضع SaaS) حتى يعمل خادم الإرسال بالخلفية. بالوضع المحلي تقدر تجهّز القوالب والجدولات بس ما رح تُرسل تلقائيًا.</p>
     </div>` : ''}
 
-    <div class="section-title" style="margin-top:0;">القوالب <span class="link" id="add-template-btn">+ إضافة قالب</span></div>
+    <div class="section-title" style="margin-top:0;">القوالب ${canManage ? `<span class="link" id="add-template-btn">+ إضافة قالب</span>` : ''}</div>
     <div class="card" style="padding:6px 10px;">
-      ${templates.length ? templates.map(templateRow).join('') : emptyState('✉️', 'لا توجد قوالب بعد', 'أضف قالبًا لتبدأ الجدولة')}
+      ${templates.length ? templates.map(t => templateRow(t, canManage)).join('') : emptyState('✉️', 'لا توجد قوالب بعد', 'أضف قالبًا لتبدأ الجدولة')}
     </div>
 
     <div class="section-title">الجدولة ${canManage ? `<span class="link" id="add-schedule-btn">+ جدولة جديدة</span>` : ''}</div>
     <div class="card" style="padding:6px 10px;">
-      ${activeSchedules.length ? activeSchedules.map(s => scheduleRow(s, templates, false)).join('') : emptyState('🗓️', 'لا توجد جدولات قائمة بانتظار الإرسال')}
+      ${activeSchedules.length ? activeSchedules.map(s => scheduleRow(s, templates, false, canManage)).join('') : emptyState('🗓️', 'لا توجد جدولات قائمة بانتظار الإرسال')}
     </div>
 
     ${archivedSchedules.length ? `
     <details class="card" style="padding:6px 10px;">
       <summary style="cursor:pointer;font-weight:700;font-size:13.5px;padding:6px 4px;">📦 الأرشيف (${archivedSchedules.length})</summary>
-      ${archivedSchedules.map(s => scheduleRow(s, templates, true)).join('')}
+      ${archivedSchedules.map(s => scheduleRow(s, templates, true, canManage)).join('')}
     </details>` : ''}
 
     <div class="section-title">
@@ -61,7 +61,8 @@ export async function renderSms(container) {
     </div>
   `;
 
-  container.querySelector('#add-template-btn').onclick = () => openTemplateForm(container, null);
+  const addTemplateBtn = container.querySelector('#add-template-btn');
+  if (addTemplateBtn) addTemplateBtn.onclick = () => openTemplateForm(container, null);
   container.querySelectorAll('[data-tpl-edit]').forEach(el => el.onclick = () => {
     const t = templates.find(x => x.id === el.dataset.tplEdit);
     openTemplateForm(container, t);
@@ -118,17 +119,19 @@ export async function renderSms(container) {
   if (statusFilter) statusFilter.onchange = applyLogFilter;
 }
 
-function templateRow(t) {
+function templateRow(t, canManage) {
   return `
     <div class="list-item">
       <div class="avatar">✉️</div>
       <div class="info"><div class="title">${escapeHtml(t.name)}</div><div class="subtitle">${escapeHtml(t.body.slice(0, 40))}${t.body.length > 40 ? '...' : ''}</div></div>
+      ${canManage ? `
       <button class="icon-btn" data-tpl-edit="${t.id}" title="تعديل"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
       <button class="remove-btn" data-tpl-delete="${t.id}" title="حذف"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+      ` : ''}
     </div>`;
 }
 
-function scheduleRow(s, templates, archived) {
+function scheduleRow(s, templates, archived, canManage) {
   const tpl = templates.find(t => t.id === s.template_id);
   const statusColor = { pending: 'var(--blue)', completed: 'var(--success)', cancelled: 'var(--text-muted)' }[s.status] || 'var(--text-muted)';
   return `
@@ -140,12 +143,14 @@ function scheduleRow(s, templates, archived) {
       </div>
       <div style="text-align:left;">
         <div class="meta" style="color:${statusColor};font-weight:700;">${STATUS_LABELS[s.status] || s.status}</div>
+        ${canManage ? `
         <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end;">
           ${!archived ? `
             <button class="icon-btn" data-sch-edit="${s.id}" title="تعديل"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
             <button class="btn btn-sm btn-secondary" data-sch-cancel="${s.id}">إلغاء</button>
           ` : `<button class="remove-btn" data-sch-delete="${s.id}" title="حذف"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>`}
         </div>
+        ` : ''}
       </div>
     </div>`;
 }

@@ -50,10 +50,20 @@ export async function getSyncStatus() {
   return pending ? 'pending' : 'synced';
 }
 
+// يعلّم أو يزيل علامة "الجلسة منتهية" بإعدادات المستخدم، حتى تعرضها شاشة الإعدادات كتحذير واضح للمستخدم
+// (بدل ما يفاجَأ برسائل RLS تقنية غامضة بعد عدة محاولات فاشلة بطابور المزامنة)
+async function setSessionInvalidFlag(value) {
+  const settings = await localDb.getById('settings', 'app');
+  if (!settings || !!settings.sessionInvalid === value) return;
+  settings.sessionInvalid = value;
+  await localDb.put('settings', settings);
+  notify(value ? 'session_invalid' : 'synced');
+}
+
 // يعيد تهيئة عميل سوبابيس إذا لم يكن جاهزًا بعد (مثلاً لأن التطبيق فُتح أول مرة أوف لاين ولم تتحمّل مكتبة سوبابيس)
-// ثم يتأكد أن جلسة الدخول صالحة وغير منتهية قبل أي محاولة رفع.
+// ثم يتأكد أن جلسة الدخول صالحة وغير منتهية فعليًا (بطلب حقيقي للخادم، لا فقط فحص تاريخ محلي) قبل أي محاولة رفع.
 // السبب: مؤقّت التجديد التلقائي لمكتبة سوبابيس قد يتوقف عن العمل إذا بقي التطبيق بالخلفية على الجوال
-// لفترة طويلة (المتصفح يجمّد المؤقّتات بالخلفية)، فتنتهي صلاحية الجلسة دون تجديد، وأي طلب كتابة بعدها
+// لفترة طويلة (المتصفح يجمّد المؤقّتات بالخلفية)، فتنتهي صلاحية الجلسة دون تجديد سليم، وأي طلب كتابة بعدها
 // يُرفض بصمت بسياسة RLS (Row Level Security) رغم أن المستخدم يبدو "مسجّل دخوله" بواجهة التطبيق
 async function ensureRemoteClient() {
   try {
@@ -70,7 +80,14 @@ async function ensureRemoteClient() {
     if (!session || expiresAtMs < Date.now() + 60000) {
       session = await remoteDb.refreshSession();
     }
-    return !!session;
+    if (!session) { await setSessionInvalidFlag(true); return false; }
+
+    const verified = await remoteDb.verifySession();
+    if (verified.reason === 'network') return false; // تعذّر الوصول للخادم فقط - ليس بالضرورة جلسة منتهية، لا نُخطئ التشخيص
+    if (!verified.ok) { await setSessionInvalidFlag(true); return false; }
+
+    await setSessionInvalidFlag(false);
+    return true;
   } catch (e) {
     return false;
   }

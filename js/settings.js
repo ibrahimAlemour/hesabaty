@@ -70,6 +70,11 @@ export async function renderSettings(container) {
 
     <div class="card">
       <div class="section-title" style="margin-top:0;">${settings.backendMode === 'supabase' ? 'حالة الاتصال والمزامنة' : 'اتصال Supabase'}</div>
+      ${settings.sessionInvalid ? `
+      <div style="background:var(--danger-light);border-radius:10px;padding:10px;margin-bottom:10px;">
+        <p style="font-size:13px;color:var(--danger);font-weight:700;margin:0;">⚠️ جلسة الدخول انتهت أو تعطّلت</p>
+        <p style="font-size:12px;color:var(--danger);margin:6px 0 0;">بياناتك محفوظة على جهازك بأمان، لكن ما بترفع للخادم حاليًا. سجّل الخروج من الأسفل ثم سجّل الدخول من جديد بحسابك لحل المشكلة.</p>
+      </div>` : ''}
       ${settings.backendMode === 'supabase' ? '' : `
       <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">اختياري. اتركه فارغًا للعمل محليًا بدون إنترنت.</p>
       <div class="form-group"><label>Supabase URL</label><input type="text" id="st-sb-url" value="${escapeHtml(settings.supabaseUrl || SAAS_SUPABASE_URL || '')}" placeholder="https://xxxx.supabase.co"></div>

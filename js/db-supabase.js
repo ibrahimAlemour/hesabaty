@@ -129,6 +129,21 @@ export async function refreshSession() {
   return data.session;
 }
 
+// يتحقق من صلاحية الجلسة فعليًا عبر طلب حقيقي للخادم (لا يكتفي بفحص تاريخ الانتهاء محليًا)، لأن الرمز قد
+// يبدو "غير منتهٍ" محليًا لكن الخادم يرفضه فعليًا (رمز جلسة فاسد بعد تجديد غير مكتمل، تسجيل خروج من جهاز آخر...).
+// نميّز بين رفض حقيقي من الخادم (auth-error/no-user - جلسة فعلاً غير صالحة) وتعذّر الوصول للخادم أصلاً
+// (network - قد يكون انقطاع إنترنت عابر لا علاقة له بصلاحية الجلسة) حتى لا نُخطئ بمعاملة انقطاع مؤقت كجلسة منتهية
+export async function verifySession() {
+  if (!supabaseClient) return { ok: false, reason: 'no-client' };
+  try {
+    const { data, error } = await supabaseClient.auth.getUser();
+    if (error) return { ok: false, reason: 'auth-error' };
+    return { ok: !!data?.user, reason: data?.user ? null : 'no-user' };
+  } catch (e) {
+    return { ok: false, reason: 'network' };
+  }
+}
+
 // جدول profiles: يربط مستخدم Supabase Auth بالاسم والدور (owner/cashier/super_admin) والمحل التابع له
 export async function getProfile(userId) {
   const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).maybeSingle();

@@ -192,13 +192,14 @@ const SYNC_ICON_TITLES = {
   offline: 'غير متصل - العمليات محفوظة على الجهاز وسترفع تلقائيًا عند عودة الإنترنت',
   pending: 'بانتظار المزامنة مع الخادم',
   syncing: 'جاري المزامنة...',
-  synced: 'متصل ومتزامن بالكامل'
+  synced: 'متصل ومتزامن بالكامل',
+  session_invalid: '⚠️ انتهت صلاحية جلسة الدخول - سجّل الخروج والدخول من جديد من الإعدادات لضمان رفع بياناتك'
 };
 
 async function applySyncIconStatus(status) {
   const btn = document.getElementById('sync-status-btn');
   if (!btn) return;
-  btn.classList.remove('sync-offline', 'sync-pending', 'sync-syncing', 'sync-synced');
+  btn.classList.remove('sync-offline', 'sync-pending', 'sync-syncing', 'sync-synced', 'sync-session_invalid');
   btn.classList.add(`sync-${status}`);
 
   // نعرض عدد عمليات البيع غير المتزامنة تحديدًا (لا العدد الخام لعناصر طابور المزامنة، لأن كل عملية بيع

@@ -98,13 +98,16 @@ function openAddCustomerSheet(container, onSaved) {
 
 export async function renderCustomerDetail(container, customerId) {
   container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
-  const [customer, balance, ledger, user] = await Promise.all([
-    db.getCustomer(customerId), db.getCustomerBalance(customerId), db.getCustomerLedger(customerId), getCurrentUser()
+  const [customer, balance, ledger, smsLogAll, user] = await Promise.all([
+    db.getCustomer(customerId), db.getCustomerBalance(customerId), db.getCustomerLedger(customerId), db.getSmsLog(200), getCurrentUser()
   ]);
   if (!customer) { container.innerHTML = `<div class="card">الزبون غير موجود</div>`; return; }
   const canManage = canDelete(user);
   const dueDate = await db.getExpectedDueDate(customer, balance);
   const overdue = dueDate && new Date(dueDate) < new Date();
+  const smsLog = smsLogAll.filter(e => e.customer_id === customerId);
+  const smsSent = smsLog.filter(e => e.status === 'sent').length;
+  const smsFailed = smsLog.filter(e => e.status === 'failed').length;
 
   container.innerHTML = `
     <div class="card">
@@ -129,6 +132,14 @@ export async function renderCustomerDetail(container, customerId) {
     <div class="section-title">سجل الحركات</div>
     <div class="card" style="padding:6px 10px;">
       ${ledger.length ? ledger.map(ledgerRow).join('') : emptyState('📋', 'لا توجد حركات بعد')}
+    </div>
+
+    <div class="section-title">
+      سجل الرسائل
+      ${smsLog.length ? `<span class="meta" style="font-weight:700;">✅ ${smsSent}${smsFailed ? ` &nbsp;|&nbsp; ❌ ${smsFailed}` : ''}</span>` : ''}
+    </div>
+    <div class="card" style="padding:6px 10px;">
+      ${smsLog.length ? smsLog.map(smsLogRow).join('') : emptyState('✉️', 'لا توجد رسائل مُرسلة لهذا الزبون بعد')}
     </div>
   `;
 
@@ -161,6 +172,23 @@ function ledgerRow(entry) {
         <div class="subtitle">${formatDateTime(entry.date)}</div>
       </div>
       <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
+    </div>`;
+}
+
+const SMS_STATUS_LABELS = { sent: 'تم الإرسال', failed: 'فشلت', pending: 'قيد الإرسال' };
+
+function smsLogRow(entry) {
+  const color = { sent: 'var(--success)', failed: 'var(--danger)', pending: 'var(--warning)' }[entry.status] || 'var(--text-muted)';
+  const bg = { sent: 'var(--success-light)', failed: 'var(--danger-light)' }[entry.status] || 'var(--border)';
+  return `
+    <div class="list-item">
+      <div class="avatar" style="background:${bg};color:${color};">📩</div>
+      <div class="info">
+        <div class="title">${escapeHtml((entry.message || '').slice(0, 45))}${(entry.message || '').length > 45 ? '...' : ''}</div>
+        <div class="subtitle">${formatDateTime(entry.sent_at || entry.created_at)}</div>
+        ${entry.error ? `<div class="meta" style="color:var(--danger);">${escapeHtml(entry.error)}</div>` : ''}
+      </div>
+      <div class="meta" style="color:${color};font-weight:700;">${SMS_STATUS_LABELS[entry.status] || entry.status}</div>
     </div>`;
 }
 

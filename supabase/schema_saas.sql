@@ -256,6 +256,15 @@ drop policy if exists audit_insert on audit_log;
 create policy audit_isolated_select on audit_log for select using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
 create policy audit_isolated_insert on audit_log for insert with check (shop_id = my_shop_id());
 
+-- ---------- 17) إصلاح: audit_log و cash_transactions كانا بدون سياسة UPDATE إطلاقًا ----------
+-- المزامنة (upsert) قد تتحول لعملية "تعديل" ضمنيًا عند إعادة محاولة رفع سجل نجح فعليًا بالمرة الأولى لكن الجهاز
+-- لم يتأكد من ذلك (مثل انقطاع شبكي عابر بعد نجاح الكتابة). بدون سياسة UPDATE يُرفض هذا التعديل الضمني دائمًا
+-- ودون أي علاقة بصلاحية المستخدم، فتبقى العملية عالقة للأبد بخطأ RLS مضلّل.
+create policy audit_isolated_update on audit_log for update using (shop_id = my_shop_id() or is_super_admin());
+create policy audit_isolated_delete on audit_log for delete using (shop_id = my_shop_id() or is_super_admin());
+create policy cash_tx_isolated_update on cash_transactions for update using (shop_id = my_shop_id() or is_super_admin());
+create policy cash_tx_isolated_delete on cash_transactions for delete using (shop_id = my_shop_id() or is_super_admin());
+
 -- categories: تبقى بيانات مرجعية مشتركة لكل المحلات (نفس التصنيفات الستة للجميع)
 drop policy if exists categories_select on categories;
 drop policy if exists categories_write on categories;

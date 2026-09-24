@@ -129,32 +129,82 @@ export async function renderCustomerDetail(container, customerId) {
       <button class="btn btn-danger btn-block" style="margin-top:8px;" id="delete-customer-btn">حذف الزبون</button>` : ''}
     </div>
 
-    <div class="section-title">سجل الحركات</div>
-    <div class="card" style="padding:6px 10px;max-height:320px;overflow-y:auto;">
-      ${ledger.length ? ledger.map(ledgerRow).join('') : emptyState('📋', 'لا توجد حركات بعد')}
-    </div>
-
-    <div class="section-title">
-      سجل الرسائل
-      ${smsLog.length ? `<span class="meta" style="font-weight:700;">✅ ${smsSent}${smsFailed ? ` &nbsp;|&nbsp; ❌ ${smsFailed}` : ''}</span>` : ''}
-    </div>
-    <div class="card" style="padding:6px 10px;max-height:320px;overflow-y:auto;">
-      ${smsLog.length ? smsLog.map(smsLogRow).join('') : emptyState('✉️', 'لا توجد رسائل مُرسلة لهذا الزبون بعد')}
+    <div class="card" style="padding:10px;">
+      <div class="seg-tabs">
+        <button class="seg-tab active" data-tab="ledger">سجل الحركات</button>
+        <button class="seg-tab" data-tab="sms">سجل الرسائل</button>
+      </div>
+      <div id="tab-content"></div>
     </div>
   `;
 
+  const TAB_LIMIT = 4;
+
+  function bindEntryClicks(root) {
+    root.querySelectorAll('[data-ledger-open]').forEach(el => el.onclick = () => {
+      const [type, id] = el.dataset.ledgerOpen.split(':');
+      const entry = ledger.find(e => e.type === type && e.id === id);
+      if (entry) openLedgerDetailSheet(entry);
+    });
+    root.querySelectorAll('[data-sms-open]').forEach(el => el.onclick = () => {
+      const entry = smsLog.find(e => e.id === el.dataset.smsOpen);
+      if (entry) openSmsDetailSheet(entry);
+    });
+  }
+
+  function renderTabContent(tab) {
+    if (tab === 'ledger') {
+      const items = ledger.slice(0, TAB_LIMIT);
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="font-weight:800;font-size:14px;">آخر الحركات</div>
+          ${ledger.length ? `<span class="badge" style="background:var(--bg);color:var(--text-muted);">آخر ${Math.min(TAB_LIMIT, ledger.length)}</span>` : ''}
+        </div>
+        ${ledger.length ? items.map(ledgerRow).join('') : emptyState('📋', 'لا توجد حركات بعد')}
+        ${ledger.length > TAB_LIMIT ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" data-view-all="ledger">عرض جميع الحركات</button>` : ''}
+      `;
+    }
+    const items = smsLog.slice(0, TAB_LIMIT);
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div style="font-weight:800;font-size:14px;">آخر الرسائل</div>
+        ${smsLog.length ? `<span class="badge" style="background:var(--bg);color:var(--text-muted);">آخر ${Math.min(TAB_LIMIT, smsLog.length)}</span>` : ''}
+      </div>
+      ${smsLog.length ? `<div class="meta" style="margin-bottom:6px;font-weight:700;">✅ ${smsSent}${smsFailed ? ` &nbsp;|&nbsp; ❌ ${smsFailed}` : ''}</div>` : ''}
+      ${smsLog.length ? items.map(smsLogRow).join('') : emptyState('✉️', 'لا توجد رسائل مُرسلة لهذا الزبون بعد')}
+      ${smsLog.length > TAB_LIMIT ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" data-view-all="sms">عرض جميع الرسائل</button>` : ''}
+    `;
+  }
+
+  function openFullListSheet(tab) {
+    const isLedger = tab === 'ledger';
+    const items = isLedger ? ledger : smsLog;
+    const overlay = openSheet(`
+      <div class="sheet-header"><h3>${isLedger ? 'كل الحركات' : 'كل الرسائل'}</h3>${closeBtnHtml()}</div>
+      <div class="card" style="padding:6px 10px;max-height:65vh;overflow-y:auto;">
+        ${items.length ? items.map(isLedger ? ledgerRow : smsLogRow).join('') : emptyState(isLedger ? '📋' : '✉️', isLedger ? 'لا توجد حركات بعد' : 'لا توجد رسائل بعد')}
+      </div>
+    `);
+    overlay.querySelector('[data-detail-close]').onclick = closeSheet;
+    bindEntryClicks(overlay);
+  }
+
+  function renderActiveTab(tab) {
+    const tabContentEl = container.querySelector('#tab-content');
+    tabContentEl.innerHTML = renderTabContent(tab);
+    bindEntryClicks(tabContentEl);
+    const viewAllBtn = tabContentEl.querySelector('[data-view-all]');
+    if (viewAllBtn) viewAllBtn.onclick = () => openFullListSheet(viewAllBtn.dataset.viewAll);
+  }
+
+  container.querySelectorAll('.seg-tab').forEach(btn => btn.onclick = () => {
+    container.querySelectorAll('.seg-tab').forEach(b => b.classList.toggle('active', b === btn));
+    renderActiveTab(btn.dataset.tab);
+  });
+  renderActiveTab('ledger');
+
   container.querySelector('#record-payment-btn').onclick = () => openRecordPaymentSheet(customer, balance, () => renderCustomerDetail(container, customerId));
   container.querySelector('#add-charge-btn').onclick = () => openAddChargeSheet(customer, () => renderCustomerDetail(container, customerId));
-
-  container.querySelectorAll('[data-ledger-open]').forEach(el => el.onclick = () => {
-    const [type, id] = el.dataset.ledgerOpen.split(':');
-    const entry = ledger.find(e => e.type === type && e.id === id);
-    if (entry) openLedgerDetailSheet(entry);
-  });
-  container.querySelectorAll('[data-sms-open]').forEach(el => el.onclick = () => {
-    const entry = smsLog.find(e => e.id === el.dataset.smsOpen);
-    if (entry) openSmsDetailSheet(entry);
-  });
 
   if (canManage) {
     container.querySelector('#edit-customer-btn').onclick = () => openEditCustomerSheet(customer, () => renderCustomerDetail(container, customerId));

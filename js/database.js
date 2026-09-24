@@ -109,12 +109,11 @@ async function writeRecord(storeName, record) {
     // قبل أول تسجيل دخول فعلي لا نعرف shop_id بعد؛ لا نحاول الرفع حتى لا يعلق طلب خاطئ بطابور المزامنة للأبد
     if (!s.currentShopId) return record;
     const payload = toRemotePayload(storeName, record, s.currentShopId);
-    if (navigator.onLine && remoteDb.getClient()) {
-      try { await remoteDb.put(storeName, payload); }
-      catch (e) { await sync.enqueue(storeName, 'put', payload); }
-    } else {
-      await sync.enqueue(storeName, 'put', payload);
-    }
+    // نمرّر دائمًا عبر طابور المزامنة (حتى وإن كنا متصلين) لأن flushQueue تتحقق أولًا من صلاحية الجلسة فعليًا
+    // بالخادم قبل أي كتابة - كتابة مباشرة بدون هذا الفحص قد تنجح محليًا لكن تُرفض بصمت بسياسة RLS إذا كانت
+    // الجلسة تبدو صالحة محليًا (لم تنتهِ زمنيًا بعد) لكنها فعليًا معطّلة، دون أي تنبيه واضح للمستخدم
+    await sync.enqueue(storeName, 'put', payload);
+    if (navigator.onLine) sync.flushQueue();
   }
   return record;
 }

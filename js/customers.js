@@ -130,7 +130,7 @@ export async function renderCustomerDetail(container, customerId) {
     </div>
 
     <div class="section-title">سجل الحركات</div>
-    <div class="card" style="padding:6px 10px;">
+    <div class="card" style="padding:6px 10px;max-height:320px;overflow-y:auto;">
       ${ledger.length ? ledger.map(ledgerRow).join('') : emptyState('📋', 'لا توجد حركات بعد')}
     </div>
 
@@ -138,13 +138,23 @@ export async function renderCustomerDetail(container, customerId) {
       سجل الرسائل
       ${smsLog.length ? `<span class="meta" style="font-weight:700;">✅ ${smsSent}${smsFailed ? ` &nbsp;|&nbsp; ❌ ${smsFailed}` : ''}</span>` : ''}
     </div>
-    <div class="card" style="padding:6px 10px;">
+    <div class="card" style="padding:6px 10px;max-height:320px;overflow-y:auto;">
       ${smsLog.length ? smsLog.map(smsLogRow).join('') : emptyState('✉️', 'لا توجد رسائل مُرسلة لهذا الزبون بعد')}
     </div>
   `;
 
   container.querySelector('#record-payment-btn').onclick = () => openRecordPaymentSheet(customer, balance, () => renderCustomerDetail(container, customerId));
   container.querySelector('#add-charge-btn').onclick = () => openAddChargeSheet(customer, () => renderCustomerDetail(container, customerId));
+
+  container.querySelectorAll('[data-ledger-open]').forEach(el => el.onclick = () => {
+    const [type, id] = el.dataset.ledgerOpen.split(':');
+    const entry = ledger.find(e => e.type === type && e.id === id);
+    if (entry) openLedgerDetailSheet(entry);
+  });
+  container.querySelectorAll('[data-sms-open]').forEach(el => el.onclick = () => {
+    const entry = smsLog.find(e => e.id === el.dataset.smsOpen);
+    if (entry) openSmsDetailSheet(entry);
+  });
 
   if (canManage) {
     container.querySelector('#edit-customer-btn').onclick = () => openEditCustomerSheet(customer, () => renderCustomerDetail(container, customerId));
@@ -165,7 +175,7 @@ export async function renderCustomerDetail(container, customerId) {
 function ledgerRow(entry) {
   const isDebt = entry.direction === 'debt';
   return `
-    <div class="list-item">
+    <div class="list-item" style="cursor:pointer;" data-ledger-open="${entry.type}:${entry.id}">
       <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
       <div class="info">
         <div class="title">${escapeHtml(entry.label)}</div>
@@ -181,7 +191,7 @@ function smsLogRow(entry) {
   const color = { sent: 'var(--success)', failed: 'var(--danger)', pending: 'var(--warning)' }[entry.status] || 'var(--text-muted)';
   const bg = { sent: 'var(--success-light)', failed: 'var(--danger-light)' }[entry.status] || 'var(--border)';
   return `
-    <div class="list-item">
+    <div class="list-item" style="cursor:pointer;" data-sms-open="${entry.id}">
       <div class="avatar" style="background:${bg};color:${color};">📩</div>
       <div class="info">
         <div class="title">${escapeHtml((entry.message || '').slice(0, 45))}${(entry.message || '').length > 45 ? '...' : ''}</div>
@@ -190,6 +200,38 @@ function smsLogRow(entry) {
       </div>
       <div class="meta" style="color:${color};font-weight:700;">${SMS_STATUS_LABELS[entry.status] || entry.status}</div>
     </div>`;
+}
+
+function closeBtnHtml() {
+  return `<button class="icon-btn" data-detail-close title="إغلاق"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
+}
+
+function openLedgerDetailSheet(entry) {
+  const isDebt = entry.direction === 'debt';
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>تفاصيل الحركة</h3>${closeBtnHtml()}</div>
+    <div style="text-align:center;margin-bottom:14px;">
+      <div class="amount ${isDebt ? 'debt' : 'cash'}" style="font-size:24px;">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
+      <div class="meta">${isDebt ? 'دين مسجّل على الزبون' : 'دفعة من الزبون'}</div>
+    </div>
+    <div class="form-group"><label>الوصف</label><p style="margin:4px 0;">${escapeHtml(entry.label)}</p></div>
+    <div class="form-group"><label>التاريخ والوقت</label><p style="margin:4px 0;">${formatDateTime(entry.date)}</p></div>
+    ${entry.notes ? `<div class="form-group"><label>ملاحظات</label><p style="margin:4px 0;">${escapeHtml(entry.notes)}</p></div>` : ''}
+  `);
+  overlay.querySelector('[data-detail-close]').onclick = closeSheet;
+}
+
+function openSmsDetailSheet(entry) {
+  const color = { sent: 'var(--success)', failed: 'var(--danger)', pending: 'var(--warning)' }[entry.status] || 'var(--text-muted)';
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>تفاصيل الرسالة</h3>${closeBtnHtml()}</div>
+    <div class="form-group"><label>نص الرسالة</label><p style="margin:4px 0;white-space:pre-wrap;">${escapeHtml(entry.message || '')}</p></div>
+    <div class="form-group"><label>الحالة</label><p style="margin:4px 0;color:${color};font-weight:700;">${SMS_STATUS_LABELS[entry.status] || entry.status}</p></div>
+    ${entry.error ? `<div class="form-group"><label>سبب الفشل</label><p style="margin:4px 0;color:var(--danger);">${escapeHtml(entry.error)}</p></div>` : ''}
+    ${entry.phone ? `<div class="form-group"><label>رقم الهاتف</label><p style="margin:4px 0;">${escapeHtml(entry.phone)}</p></div>` : ''}
+    <div class="form-group"><label>وقت الإرسال</label><p style="margin:4px 0;">${formatDateTime(entry.sent_at || entry.created_at)}</p></div>
+  `);
+  overlay.querySelector('[data-detail-close]').onclick = closeSheet;
 }
 
 export function openRecordPaymentSheet(customer, currentBalance, onDone) {

@@ -341,6 +341,18 @@ function openRecordPaymentSheet(container, shop, latestSub) {
   };
 }
 
+const COPY_ICON_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+
+async function copyToClipboard(text, label) {
+  if (!text) return;
+  try { await navigator.clipboard.writeText(text); toastSuccess(`تم نسخ ${label}`); }
+  catch (e) { toastError('تعذّر النسخ'); }
+}
+
+function generateRandomPassword() {
+  return Math.random().toString(36).slice(-5) + Math.floor(10 + Math.random() * 89);
+}
+
 function openEditShopSheet(container, shop) {
   const overlay = openSheet(`
     <div class="sheet-header"><h3>تعديل بيانات المحل</h3></div>
@@ -350,7 +362,67 @@ function openEditShopSheet(container, shop) {
     <div class="form-group"><label>العنوان</label><input type="text" id="es-address" value="${escapeHtml(shop.address || '')}"></div>
     <div class="form-group"><label>ملاحظات</label><textarea id="es-notes">${escapeHtml(shop.notes || '')}</textarea></div>
     <button class="btn btn-primary btn-block" id="es-save">حفظ التعديلات</button>
+
+    <div class="divider-label">حساب دخول صاحب المحل</div>
+    <div class="form-group">
+      <label>البريد الإلكتروني</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="es-email" value="جاري التحميل..." readonly style="flex:1;">
+        <button type="button" class="icon-btn" id="es-copy-email" title="نسخ البريد">${COPY_ICON_SVG}</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>كلمة المرور</label>
+      <p class="hint" style="margin:0 0 8px;">كلمة المرور الحالية غير قابلة للعرض أبدًا لأي جهة (تُخزَّن مُشفّرة بنظام المصادقة). يمكنك بدلًا من ذلك تعيين كلمة مرور جديدة:</p>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="es-new-password" placeholder="كلمة مرور جديدة (6 أحرف على الأقل)" style="flex:1;">
+        <button type="button" class="btn btn-secondary btn-sm" id="es-gen-pass">توليد</button>
+      </div>
+      <button type="button" class="btn btn-outline btn-block" style="margin-top:8px;" id="es-reset-pass">تعيين كلمة المرور الجديدة</button>
+      <div id="es-pass-result" style="display:none;margin-top:10px;background:var(--primary-light);border-radius:10px;padding:10px;">
+        <div style="font-size:12px;color:var(--text-muted);">تم تعيين كلمة المرور الجديدة - احفظها الآن، لن تظهر مرة أخرى:</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <div id="es-pass-value" style="font-weight:800;font-size:15px;flex:1;"></div>
+          <button type="button" class="icon-btn" id="es-copy-pass" title="نسخ كلمة المرور">${COPY_ICON_SVG}</button>
+        </div>
+      </div>
+    </div>
   `);
+
+  const emailInput = overlay.querySelector('#es-email');
+  adb.getOwnerEmail(shop.id).then(email => { emailInput.value = email || 'لا يوجد بريد'; })
+    .catch(err => { emailInput.value = 'تعذّر جلب البريد'; console.error(err); });
+  overlay.querySelector('#es-copy-email').onclick = () => copyToClipboard(emailInput.value, 'البريد الإلكتروني');
+
+  overlay.querySelector('#es-gen-pass').onclick = () => {
+    overlay.querySelector('#es-new-password').value = generateRandomPassword();
+  };
+
+  overlay.querySelector('#es-reset-pass').onclick = async () => {
+    const newPassword = overlay.querySelector('#es-new-password').value;
+    if (!newPassword || newPassword.length < 6) return toastError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    const ok = await confirmDialog({
+      title: 'تعيين كلمة مرور جديدة',
+      message: 'كلمة المرور الحالية لصاحب المحل ستصبح غير صالحة فورًا، ولن يمكن التراجع عن هذا الإجراء. هل تريد الاستمرار؟',
+      confirmLabel: 'تعيين كلمة المرور'
+    });
+    if (!ok) return;
+    const btn = overlay.querySelector('#es-reset-pass');
+    setLoading(btn, true, 'جاري التحديث...');
+    try {
+      const admin = await getCurrentAdmin();
+      await adb.resetOwnerPassword(shop.id, newPassword);
+      await adb.logAdminAction(admin, 'reset_owner_password', shop.id, {});
+      overlay.querySelector('#es-pass-value').textContent = newPassword;
+      overlay.querySelector('#es-pass-result').style.display = '';
+      overlay.querySelector('#es-copy-pass').onclick = () => copyToClipboard(newPassword, 'كلمة المرور');
+      toastSuccess('تم تعيين كلمة المرور الجديدة');
+    } catch (err) {
+      toastError(err.message || 'حدث خطأ أثناء تحديث كلمة المرور');
+    }
+    setLoading(btn, false);
+  };
+
   overlay.querySelector('#es-save').onclick = async () => {
     const name = overlay.querySelector('#es-name').value.trim();
     if (!name) return toastError('أدخل اسم المحل');

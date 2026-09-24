@@ -67,6 +67,34 @@ export async function deleteShopPermanently(shopId) {
   return data;
 }
 
+// يجلب بريد صاحب المحل الحالي (مخزّن بنظام المصادقة فقط، غير قابل للقراءة إلا عبر هذا المسار الآمن بالخادم)
+export async function getOwnerEmail(shopId) {
+  const session = await getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/admin/get-owner-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ shopId })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل جلب البريد الإلكتروني');
+  return data.email;
+}
+
+// يعيّن كلمة مرور جديدة لحساب صاحب المحل (كلمة المرور القديمة غير قابلة للاسترجاع أبدًا - مبدأ أمني بكل أنظمة المصادقة)
+export async function resetOwnerPassword(shopId, newPassword) {
+  const session = await getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/admin/reset-owner-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ shopId, newPassword })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل تحديث كلمة المرور');
+  return data;
+}
+
 export async function updateShop(id, patch) {
   const { data, error } = await client().from('shops').update({ ...patch, updated_at: nowISO() }).eq('id', id).select().single();
   if (error) throw error;

@@ -13,6 +13,12 @@ export default {
     if (url.pathname === '/api/admin/delete-shop') {
       return handleDeleteShop(request, env);
     }
+    if (url.pathname === '/api/admin/get-owner-email') {
+      return handleGetOwnerEmail(request, env);
+    }
+    if (url.pathname === '/api/admin/reset-owner-password') {
+      return handleResetOwnerPassword(request, env);
+    }
     return env.ASSETS.fetch(request);
   },
 
@@ -158,6 +164,61 @@ async function handleDeleteShop(request, env) {
     const errBody = await deleteRes.json().catch(() => ({}));
     return json({ error: errBody.message || 'فشل حذف المحل' }, 500);
   }
+
+  return json({ ok: true });
+}
+
+// يجلب معرّف حساب صاحب المحل (profile بدور owner مرتبط بهذا shop_id) - يُستخدم من الدالتين التاليتين
+async function findOwnerProfileId(shopId, svcHeaders) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?shop_id=eq.${shopId}&role=eq.owner&select=id&limit=1`, { headers: svcHeaders });
+  const rows = await res.json();
+  return Array.isArray(rows) && rows[0] ? rows[0].id : null;
+}
+
+// يعيد بريد صاحب المحل الحالي (مخزّن فقط بنظام Supabase Auth، غير موجود بجدول profiles، فلا يمكن قراءته إلا بمفتاح service_role هنا)
+async function handleGetOwnerEmail(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const auth = await requireSuperAdmin(request, env);
+  if (auth.error) return auth.error;
+  const { svcHeaders } = auth;
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'بيانات الطلب غير صالحة' }, 400); }
+  const { shopId } = body || {};
+  if (!shopId) return json({ error: 'معرّف المحل مفقود' }, 400);
+
+  const ownerId = await findOwnerProfileId(shopId, svcHeaders);
+  if (!ownerId) return json({ error: 'لا يوجد حساب مالك مرتبط بهذا المحل' }, 404);
+
+  const userRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${ownerId}`, { headers: svcHeaders });
+  const userData = await userRes.json();
+  if (!userRes.ok) return json({ error: userData.msg || 'فشل جلب بيانات الحساب' }, 500);
+
+  return json({ email: userData.email || '' });
+}
+
+// يُعيّن كلمة مرور جديدة لحساب صاحب المحل. ملاحظة أمنية مهمة: كلمة المرور القديمة غير قابلة للاسترجاع أبدًا
+// (Supabase Auth يخزّنها مُجزّأة/hashed فقط، حتى نحن كمزوّد خدمة لا نستطيع قراءتها) - الحل الوحيد تعيين كلمة جديدة
+async function handleResetOwnerPassword(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const auth = await requireSuperAdmin(request, env);
+  if (auth.error) return auth.error;
+  const { svcHeaders } = auth;
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'بيانات الطلب غير صالحة' }, 400); }
+  const { shopId, newPassword } = body || {};
+  if (!shopId) return json({ error: 'معرّف المحل مفقود' }, 400);
+  if (!newPassword || String(newPassword).length < 6) return json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' }, 400);
+
+  const ownerId = await findOwnerProfileId(shopId, svcHeaders);
+  if (!ownerId) return json({ error: 'لا يوجد حساب مالك مرتبط بهذا المحل' }, 404);
+
+  const updateRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${ownerId}`, {
+    method: 'PUT', headers: svcHeaders, body: JSON.stringify({ password: newPassword })
+  });
+  const updateData = await updateRes.json();
+  if (!updateRes.ok) return json({ error: updateData.msg || 'فشل تحديث كلمة المرور' }, 500);
 
   return json({ ok: true });
 }

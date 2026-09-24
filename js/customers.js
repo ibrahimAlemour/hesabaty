@@ -124,9 +124,18 @@ export async function renderCustomerDetail(container, customerId) {
         ${dueDate ? `<div class="label" style="${overdue ? 'color:var(--danger);font-weight:700;' : ''}margin-top:4px;">${overdue ? '⚠️ تجاوز موعد السداد المتوقع' : 'موعد السداد المتوقع'}: ${formatDate(dueDate)}</div>` : ''}
       </div>
       <button class="btn btn-primary btn-block" id="record-payment-btn">💵 تسجيل دفعة</button>
-      <button class="btn btn-outline btn-block" style="margin-top:8px;" id="add-charge-btn">📝 إضافة دين (بدون منتجات)</button>
-      ${canManage ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" id="edit-customer-btn">تعديل بيانات الزبون</button>
-      <button class="btn btn-danger btn-block" style="margin-top:8px;" id="delete-customer-btn">حذف الزبون</button>` : ''}
+      <div class="icon-action-grid" style="margin-top:10px;">
+        ${canManage ? `
+        <button class="icon-action-btn" id="edit-customer-btn">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          تعديل بيانات الزبون
+        </button>` : ''}
+        <button class="icon-action-btn" id="add-charge-btn">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+          إضافة دين
+        </button>
+      </div>
+      ${canManage ? `<button class="btn btn-danger btn-block" style="margin-top:10px;" id="delete-customer-btn">🗑️ حذف الزبون</button>` : ''}
     </div>
 
     <div class="card" style="padding:10px;">

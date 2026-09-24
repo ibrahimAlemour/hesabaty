@@ -293,30 +293,63 @@ async function markScheduleDone(schedule, svcHeaders) {
   }
 }
 
-// ---------- التكامل مع مزوّد TweetSMS (tweetsms.ps) ----------
+// ---------- التكامل مع مزوّد TweetSMS (tweetsms.ps) - واجهة JSON الرسمية ----------
 // المفتاح والمرسل يُقرآن من أسرار Cloudflare (SMS_PROVIDER_API_KEY / SMS_PROVIDER_SENDER) - لا يوجدان بالكود أبدًا
-// تنسيق الرد الدقيق من المزوّد غير موثّق هنا؛ نعتمد كشفًا مبدئيًا للنجاح/الفشل يُدقَّق فور وصول أول ردود فعلية بالسجل
+// أكواد الرد موثّقة رسميًا من TweetSMS (Postman collection) - راجع TWEETSMS_ERROR_CODES بالأسفل
+const TWEETSMS_ERROR_CODES = {
+  '-100': 'معاملات ناقصة بالطلب',
+  '-110': 'اسم المستخدم أو كلمة المرور خاطئة',
+  '-111': 'الحساب غير مفعّل',
+  '-112': 'الحساب محظور',
+  '-114': 'خدمة الإرسال متوقفة لهذا الحساب',
+  '-115': 'اسم المرسل (Sender) غير صالح',
+  '-116': 'اسم المرسل (Sender) غير صالح',
+  '-120': 'لا يوجد أرقام صالحة بالطلب',
+  '-124': 'لا يوجد رصيد كافٍ بحساب TweetSMS لإرسال هذه الرسالة',
+  '-126': 'تعذّر الإرسال الآن (قد تكون تُرسل من مصدر آخر بنفس الوقت)'
+};
+
 async function sendSms(phone, message, env) {
   const apiKey = env.SMS_PROVIDER_API_KEY;
   if (!apiKey) return { success: false, error: 'السرّ SMS_PROVIDER_API_KEY غير مضبوط على Cloudflare Workers' };
+  const sender = env.SMS_PROVIDER_SENDER;
+  if (!sender) return { success: false, error: 'السرّ SMS_PROVIDER_SENDER غير مضبوط على Cloudflare Workers' };
 
   const normalizedPhone = normalizePalestinianPhone(phone);
   if (!normalizedPhone) return { success: false, error: `رقم هاتف غير صالح: ${phone}` };
 
-  const params = new URLSearchParams({
-    comm: 'sendsms',
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const body = {
     api_key: apiKey,
-    to: normalizedPhone,
+    sender,
     message,
-    sender: env.SMS_PROVIDER_SENDER || 'TweetTEST'
-  });
+    to: normalizedPhone,
+    groups: '',
+    date: `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`,
+    time: `${pad(now.getHours())}:${pad(now.getMinutes())}`
+  };
 
   try {
-    const res = await fetch(`https://tweetsms.ps/api.php?${params.toString()}`);
+    const res = await fetch('https://www.tweetsms.ps/api.php/office/sendsms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
     const text = (await res.text()).trim();
-    if (!res.ok) return { success: false, error: `فشل الاتصال بمزوّد SMS (HTTP ${res.status}): ${text.slice(0, 300)}` };
-    if (/error|fail|invalid|خطأ|فشل/i.test(text)) return { success: false, error: text.slice(0, 300) };
-    return { success: true };
+
+    let code = null;
+    try {
+      const parsed = JSON.parse(text);
+      code = typeof parsed === 'number' || typeof parsed === 'string' ? parsed : (parsed?.code ?? parsed?.status ?? null);
+    } catch (e) {
+      const match = text.match(/-?\d+/);
+      code = match ? match[0] : null;
+    }
+    code = String(code);
+
+    if (code === '999') return { success: true };
+    return { success: false, error: TWEETSMS_ERROR_CODES[code] || `رد غير متوقع من المزوّد: ${text.slice(0, 200)}` };
   } catch (e) {
     return { success: false, error: `تعذّر الاتصال بمزوّد SMS: ${e.message}` };
   }

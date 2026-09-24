@@ -758,6 +758,27 @@ export function renderSmsTemplate(body, { customerName, balanceCents, dueDate, s
     .split('{shop_name}').join(shopName || '');
 }
 
+// يحسب عدد رسائل SMS التي يستهلكها نص معيّن: العربية 70 حرف/رسالة، الإنجليزية 160 حرف/رسالة (تقريب للأعلى)
+// نفس المنطق مكرّر بـ worker.js لاستخدامه بحساب الاستهلاك الفعلي وقت الإرسال الحقيقي
+export function countSmsSegments(text) {
+  const len = (text || '').length;
+  if (!len) return 0;
+  const isArabic = /[؀-ۿݐ-ݿ]/.test(text);
+  return Math.ceil(len / (isArabic ? 70 : 160));
+}
+
+// إجمالي رسائل SMS المرسلة فعليًا لهذا المحل (يُحدَّث بالخادم عند كل إرسال ناجح) - null لو غير متاح حاليًا (بدون اتصال)
+export async function getSmsTotalSent() {
+  const s = await getSettings();
+  if (s.backendMode !== 'supabase' || !s.currentShopId || !navigator.onLine) return null;
+  try {
+    const shop = await remoteDb.getShop(s.currentShopId);
+    return shop?.sms_segments_total || 0;
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function getSmsTemplates() {
   const rows = await localDb.getAll('smsTemplates');
   return rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));

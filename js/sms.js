@@ -11,8 +11,8 @@ const STATUS_LABELS = { pending: 'بانتظار الإرسال', completed: 'ت
 
 export async function renderSms(container) {
   container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
-  const [templates, schedules, log, settings, user] = await Promise.all([
-    db.getSmsTemplates(), db.getSmsSchedules(), db.getSmsLog(200), db.getSettings(), getCurrentUser()
+  const [templates, schedules, log, settings, user, totalSent] = await Promise.all([
+    db.getSmsTemplates(), db.getSmsSchedules(), db.getSmsLog(200), db.getSettings(), getCurrentUser(), db.getSmsTotalSent()
   ]);
   const canManage = canDelete(user);
 
@@ -25,7 +25,10 @@ export async function renderSms(container) {
     ${settings.backendMode !== 'supabase' ? `
     <div class="card" style="background:var(--warning-light);">
       <p style="font-size:12.5px;color:var(--warning);margin:0;">⚠️ الجدولة التلقائية تحتاج اتصال سوبابيس (وضع SaaS) حتى يعمل خادم الإرسال بالخلفية. بالوضع المحلي تقدر تجهّز القوالب والجدولات بس ما رح تُرسل تلقائيًا.</p>
-    </div>` : ''}
+    </div>` : `
+    <div class="stat-grid">
+      <div class="stat-card profit wide"><div class="stat-label">✉️ إجمالي الرسائل المرسلة</div><div class="stat-value">${totalSent === null ? '—' : `${totalSent} رسالة`}</div></div>
+    </div>`}
 
     <div class="section-title" style="margin-top:0;">القوالب ${canManage ? `<span class="link" id="add-template-btn">+ إضافة قالب</span>` : ''}</div>
     <div class="card" style="padding:6px 10px;">
@@ -185,16 +188,11 @@ function openScheduleLogSheet(schedule, log) {
   `);
 }
 
-// يحسب عدد الحروف وعدد رسائل SMS التقريبي (الطول الفعلي يختلف حسب قيم {name}/{amount}/{due_date} الحقيقية لكل زبون)
-function smsSegmentInfo(text) {
-  const len = text.length;
-  if (!len) return { len: 0, segments: 0 };
-  const segments = len <= 70 ? 1 : Math.ceil(len / 67);
-  return { len, segments };
-}
-
+// يحسب عدد الحروف وعدد رسائل SMS بنفس قاعدة الحساب الرسمية (db.countSmsSegments) - الطول الفعلي يختلف
+// حسب قيم {name}/{amount}/{due_date} الحقيقية لكل زبون، هذا تقدير بناءً على نص القالب كما هو
 function updateCharCounter(el, text) {
-  const { len, segments } = smsSegmentInfo(text);
+  const len = text.length;
+  const segments = db.countSmsSegments(text);
   el.textContent = segments <= 1
     ? `${len} حرف تقريبًا - رسالة واحدة`
     : `${len} حرف تقريبًا - ${segments} رسائل (السعر يتضاعف حسب عدد الرسائل)`;

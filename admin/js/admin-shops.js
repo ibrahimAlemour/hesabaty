@@ -148,6 +148,7 @@ export async function renderShopDetail(container, shopId) {
       <div class="stat-card"><div class="stat-label">📅 ينتهي في</div><div class="stat-value" style="font-size:15px;">${latestSub ? latestSub.end_date : '—'}</div></div>
       <div class="stat-card cash"><div class="stat-label">✅ إجمالي المدفوع</div><div class="stat-value">${formatMoney(totalPaid)}</div></div>
       <div class="stat-card"><div class="stat-label">🗓️ تاريخ التسجيل</div><div class="stat-value" style="font-size:15px;">${formatDate(shop.created_at)}</div></div>
+      <div class="stat-card profit wide"><div class="stat-label">✉️ إجمالي الرسائل المرسلة</div><div class="stat-value">${shop.sms_segments_total || 0} رسالة</div></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">

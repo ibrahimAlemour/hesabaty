@@ -436,6 +436,18 @@ create policy sms_log_isolated_select on sms_log for select using (shop_id = my_
 -- ---------- 15) استثناء زبائن محددين من جدولة SMS معيّنة بعينها (بالإضافة لاستثناء الزبون العام) ----------
 alter table sms_schedules add column if not exists excluded_customer_ids jsonb not null default '[]'::jsonb;
 
+-- ---------- 16) عدّاد استهلاك رسائل SMS لكل محل (عربي=70 حرف/رسالة، إنجليزي=160 حرف/رسالة) ----------
+-- يُحدَّث فقط من worker.js (بمفتاح service_role) عند كل إرسال ناجح فعليًا - لا يمكن للمحل تعديله مباشرة
+alter table shops add column if not exists sms_segments_total integer not null default 0;
+alter table sms_log add column if not exists segments integer not null default 1;
+
+create or replace function increment_shop_sms_segments(p_shop_id uuid, p_amount integer)
+returns void
+language sql
+as $$
+  update shops set sms_segments_total = sms_segments_total + p_amount where id = p_shop_id;
+$$;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

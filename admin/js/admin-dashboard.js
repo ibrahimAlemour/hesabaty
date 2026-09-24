@@ -25,6 +25,7 @@ export async function renderAdminDashboard(container) {
   const totalOutstanding = shopsWithStatus
     .filter(s => ['expired', 'overdue', 'suspended'].includes(s.computedStatus) && s.sub)
     .reduce((sum, s) => sum + (s.sub.monthly_price || 0), 0);
+  const totalSmsSent = shops.reduce((sum, s) => sum + (s.sms_segments_total || 0), 0);
 
   const now = new Date();
   const monthlyBuckets = [];
@@ -47,6 +48,7 @@ export async function renderAdminDashboard(container) {
       <div class="stat-card"><div class="stat-label">⚠️ متأخرة/منتهية</div><div class="stat-value" style="color:var(--warning);">${overdueCount}</div></div>
       <div class="stat-card profit wide"><div class="stat-label">💰 إجمالي الإيرادات المحصّلة</div><div class="stat-value">${formatMoney(totalRevenue)}</div></div>
       <div class="stat-card debt wide"><div class="stat-label">📝 إجمالي المبالغ المستحقة</div><div class="stat-value">${formatMoney(totalOutstanding)}</div></div>
+      <div class="stat-card wide"><div class="stat-label">✉️ إجمالي الرسائل المرسلة لجميع المحلات</div><div class="stat-value">${totalSmsSent} رسالة</div></div>
     </div>
 
     <div class="section-title">ملخص الإيرادات الشهرية</div>

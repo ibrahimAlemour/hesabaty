@@ -222,15 +222,24 @@ async function processOneSchedule(schedule, svcHeaders, env) {
       result = await sendSms(customer.phone, message, env);
     }
 
+    const segments = countSmsSegments(message);
     await fetch(`${SUPABASE_URL}/rest/v1/sms_log`, {
       method: 'POST', headers: svcHeaders,
       body: JSON.stringify({
         shop_id: schedule.shop_id, schedule_id: schedule.id, customer_id: customer.id,
-        customer_name: customer.name, phone: customer.phone || '', message,
+        customer_name: customer.name, phone: customer.phone || '', message, segments,
         scheduled_at: schedule.scheduled_at, sent_at: new Date().toISOString(),
         status: result.success ? 'sent' : 'failed', error: result.error || null
       })
     });
+
+    // نحدّث عدّاد استهلاك الرسائل فقط عند نجاح الإرسال فعليًا (لا نحسب المحاولات الفاشلة)
+    if (result.success) {
+      await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_shop_sms_segments`, {
+        method: 'POST', headers: svcHeaders,
+        body: JSON.stringify({ p_shop_id: schedule.shop_id, p_amount: segments })
+      });
+    }
   }
 
   await markScheduleDone(schedule, svcHeaders);
@@ -276,6 +285,14 @@ function renderSmsTemplateRemote(body, { customerName, balanceCents, dueDate, sh
     .split('{amount}').join(formatMoneyPlainRemote(balanceCents))
     .split('{due_date}').join(formatDatePlainRemote(dueDate))
     .split('{shop_name}').join(shopName || '');
+}
+
+// نفس منطق countSmsSegments بـ database.js: عربي 70 حرف/رسالة، إنجليزي 160 حرف/رسالة (تقريب للأعلى)
+function countSmsSegments(text) {
+  const len = (text || '').length;
+  if (!len) return 0;
+  const isArabic = /[؀-ۿݐ-ݿ]/.test(text);
+  return Math.ceil(len / (isArabic ? 70 : 160));
 }
 
 async function markScheduleDone(schedule, svcHeaders) {

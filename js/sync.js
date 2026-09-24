@@ -32,6 +32,12 @@ export async function getPendingItems() {
 }
 
 // معرّفات السجلات إلي لسا بانتظار الرفع لسوبابيس (تُستخدم لتمييزها بشارة "غير متزامن" بالواجهة)
+// يحذف عملية عالقة من طابور المزامنة نهائيًا دون رفعها للخادم (تُستخدم لتجاوز عملية يتكرر فشلها بلا حل، مثل تعديل على سجل تغيّرت صلاحيته)
+// السجل المحلي يبقى كما هو على هذا الجهاز، فقط تُهجر محاولة رفعه للخادم
+export async function discardItem(id) {
+  await localDb.remove('syncQueue', id);
+}
+
 export async function getPendingIds(storeName) {
   const items = await localDb.getAll('syncQueue');
   return new Set(items.filter(i => i.storeName === storeName && i.payload).map(i => i.payload.id));

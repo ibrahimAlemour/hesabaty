@@ -2,7 +2,7 @@
 import * as db from './database.js';
 import * as remoteDb from './db-supabase.js';
 import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut } from './auth.js';
-import { getPendingCount, getPendingItems, flushQueue } from './sync.js';
+import { getPendingCount, getPendingItems, flushQueue, discardItem } from './sync.js';
 import { escapeHtml } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
@@ -82,7 +82,9 @@ export async function renderSettings(container) {
       </div>
       ${stuckError ? `
       <p style="font-size:12px;color:var(--danger);margin-top:8px;">تعذّر رفع بعض العمليات: ${escapeHtml(stuckError)}</p>
-      <p style="font-size:10.5px;color:var(--text-muted);margin-top:4px;word-break:break-all;">تشخيص: shop_id بالعملية = ${escapeHtml(String(stuckItem.payload?.shop_id))} | shop_id الحالي = ${escapeHtml(String(settings.currentShopId))} | الجدول = ${escapeHtml(stuckItem.storeName)} | المحاولات = ${stuckItem.attempts}</p>
+      <p style="font-size:10.5px;color:var(--text-muted);margin-top:4px;word-break:break-all;">تشخيص: shop_id بالعملية = ${escapeHtml(String(stuckItem.payload?.shop_id))} | shop_id الحالي = ${escapeHtml(String(settings.currentShopId))} | الجدول = ${escapeHtml(stuckItem.storeName)} | العملية = ${escapeHtml(stuckItem.operation)} | المحاولات = ${stuckItem.attempts}</p>
+      <pre style="font-size:9.5px;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;word-break:break-all;background:var(--bg);padding:6px;border-radius:8px;max-height:120px;overflow-y:auto;">${escapeHtml(JSON.stringify(stuckItem.payload))}</pre>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;color:var(--danger);border-color:var(--danger);" id="st-discard-stuck">تجاهل هذه العملية العالقة نهائيًا</button>
       ` : ''}
       ${settings.backendMode === 'supabase' ? `<button class="btn btn-secondary btn-block" style="margin-top:8px;" id="st-sync-now">مزامنة الآن</button>` : ''}
     </div>
@@ -182,6 +184,21 @@ function bind(container, settings) {
     const remaining = await getPendingCount();
     if (!remaining) toastSuccess('تمت مزامنة جميع العمليات بنجاح');
     else toastError(`ما زال في ${remaining} عملية معلّقة - تحقق من رسالة الخطأ بالأسفل`);
+    renderSettings(container);
+  };
+
+  const discardStuckBtn = container.querySelector('#st-discard-stuck');
+  if (discardStuckBtn) discardStuckBtn.onclick = async () => {
+    const ok = await confirmDialog({
+      title: 'تجاهل العملية العالقة',
+      message: 'سيتم إسقاط هذا التعديل المعلّق نهائيًا دون رفعه للخادم. السجل نفسه يبقى محفوظًا على هذا الجهاز فقط. هل تريد الاستمرار؟',
+      confirmLabel: 'تجاهل نهائيًا'
+    });
+    if (!ok) return;
+    const items = await getPendingItems();
+    const stuck = items.find(i => i.lastError);
+    if (stuck) await discardItem(stuck.id);
+    toastSuccess('تم تجاهل العملية العالقة');
     renderSettings(container);
   };
 

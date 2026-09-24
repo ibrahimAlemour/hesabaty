@@ -60,11 +60,14 @@ export async function getById(storeName, id) {
   return data || null;
 }
 
+// لا نطلب .select() بعد upsert عمدًا: لا يستخدم أي مستدعٍ للقيمة المُرجعة (النموذج أوف لاين-أولًا يعتمد فقط على
+// النسخة المحلية)، وطلب SELECT إضافي بعد upsert يخضع لسياسة RLS الخاصة بالقراءة على الجدول - وهي أحيانًا أكثر
+// تشددًا من سياسة الكتابة (مثل audit_log التي تتطلب صلاحية "مالك" للقراءة فقط)، فيفشل الرفع بالكامل بلا داعٍ
 export async function put(storeName, record) {
   const table = tableOf(storeName);
-  const { data, error } = await supabaseClient.from(table).upsert(record).select().maybeSingle();
+  const { error } = await supabaseClient.from(table).upsert(record);
   if (error) throw error;
-  return data || record;
+  return record;
 }
 
 export async function bulkPut(storeName, records) {

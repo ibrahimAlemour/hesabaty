@@ -812,6 +812,25 @@ export async function addSmsSchedule({ name, templateId, target, scheduledAt, re
   return record;
 }
 
+export async function updateSmsSchedule(id, { name, templateId, target, scheduledAt, recurring, excludedCustomerIds }) {
+  const existing = await localDb.getById('smsSchedules', id);
+  if (!existing) throw new Error('الجدولة غير موجودة');
+  if (existing.status !== 'pending') throw new Error('لا يمكن تعديل جدولة تم تنفيذها أو إلغاؤها');
+  if (!templateId) throw new Error('اختر قالب الرسالة');
+  if (!scheduledAt) throw new Error('حدد تاريخ ووقت الإرسال');
+  const updated = {
+    ...existing,
+    name: name || '',
+    template_id: templateId,
+    target: target || 'all',
+    scheduled_at: scheduledAt,
+    recurring: recurring || 'once',
+    excluded_customer_ids: excludedCustomerIds || []
+  };
+  await writeRecord('smsSchedules', updated);
+  return updated;
+}
+
 export async function cancelSmsSchedule(id) {
   const existing = await localDb.getById('smsSchedules', id);
   if (!existing) return;

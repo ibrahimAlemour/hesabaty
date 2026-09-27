@@ -19,6 +19,10 @@ const TABLE_MAP = {
   smsTemplates: 'sms_templates',
   smsSchedules: 'sms_schedules',
   smsLog: 'sms_log',
+  suppliers: 'suppliers',
+  purchases: 'purchases',
+  purchaseItems: 'purchase_items',
+  supplierPayments: 'supplier_payments',
   syncQueue: null // قائمة المزامنة تبقى محلية دائمًا ولا تُرفع لسوبابيس
 };
 

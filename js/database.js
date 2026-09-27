@@ -4,7 +4,7 @@
 import * as localDb from './db-indexeddb.js';
 import * as remoteDb from './db-supabase.js';
 import * as sync from './sync.js';
-import { uuid, nowISO, toCents, startOfDay, endOfDay, addDays } from './utils.js';
+import { uuid, nowISO, toCents, fromCents, startOfDay, endOfDay, addDays } from './utils.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
 
 const SETTINGS_ID = 'app';
@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   supabaseUrl: SAAS_SUPABASE_URL,
   supabaseAnonKey: SAAS_SUPABASE_ANON_KEY,
   lastInvoiceNumber: 0,
+  lastPurchaseNumber: 0,
   openingCashBalance: 0, // بالسنت
   openingCashDate: nowISO(),
   setupCompleted: true,
@@ -73,11 +74,27 @@ function withInvoiceLock(fn) {
   return run;
 }
 
+async function nextPurchaseLabel() {
+  const s = await getSettings();
+  const n = (s.lastPurchaseNumber || 0) + 1;
+  await updateSettings({ lastPurchaseNumber: n });
+  return { number: n, label: `PUR-${String(n).padStart(6, '0')}` };
+}
+
+// طابور منفصل عن ترقيم فواتير البيع، لأن ترقيم فواتير الشراء عدّاد مستقل تمامًا (لا علاقة له بترقيم المبيعات)
+let purchaseMutex = Promise.resolve();
+function withPurchaseLock(fn) {
+  const run = purchaseMutex.then(fn, fn);
+  purchaseMutex = run.catch(() => {});
+  return run;
+}
+
 // جدول app_settings بسوبابيس أسماء أعمدته snake_case، بينما الإعدادات المحلية كائن JS بأسماء camelCase
 // هذا الترابط يحوّل بين الشكلين في الاتجاهين، ويستثني الحقول المحلية البحتة (لا تُشارك بين الأجهزة)
 const SETTINGS_REMOTE_FIELDS = {
   shopName: 'shop_name', phone: 'phone', address: 'address', currency: 'currency',
   timezone: 'timezone', theme: 'theme', lastInvoiceNumber: 'last_invoice_number',
+  lastPurchaseNumber: 'last_purchase_number',
   openingCashBalance: 'opening_cash_balance', openingCashDate: 'opening_cash_date'
 };
 
@@ -120,7 +137,7 @@ async function writeRecord(storeName, record) {
 
 // يسحب كل بيانات المحل من سوبابيس ويحدّث النسخة المحلية (IndexedDB) - يُستدعى بعد تسجيل الدخول وعند بدء التطبيق
 // بذلك يمكن رؤية نفس البيانات من أي جهاز جديد يسجّل دخوله بنفس الحساب
-const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog', 'smsTemplates', 'smsSchedules', 'smsLog'];
+const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog', 'smsTemplates', 'smsSchedules', 'smsLog', 'suppliers', 'purchases', 'purchaseItems', 'supplierPayments'];
 export async function pullFromRemote() {
   const s = await getSettings();
   if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
@@ -707,12 +724,313 @@ export async function deleteExpense(id) {
   await addAudit('expense', id, 'soft_delete', {});
 }
 
+// ---------- الموردون ----------
+// نظام مستقل تمامًا عن الزبائن: الزبون = مبلغ مستحق للمحل، المورد = مبلغ يدين به المحل له. لا يشتركان بأي جدول أو رصيد.
+export async function getSuppliers() {
+  const rows = await localDb.getAll('suppliers');
+  return rows.filter(s => !s.is_deleted).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+}
+
+export async function getSupplier(id) {
+  if (!id) return null;
+  return localDb.getById('suppliers', id);
+}
+
+export async function addSupplier(data) {
+  if (!data.name || !data.name.trim()) throw new Error('أدخل اسم المورد');
+  const record = {
+    id: uuid(),
+    name: data.name.trim(),
+    phone: data.phone || '',
+    address: data.address || '',
+    notes: data.notes || '',
+    is_deleted: false,
+    created_at: nowISO(),
+    updated_at: nowISO()
+  };
+  await writeRecord('suppliers', record);
+  await addAudit('supplier', record.id, 'create', record);
+  return record;
+}
+
+export async function updateSupplier(id, data) {
+  const existing = await localDb.getById('suppliers', id);
+  if (!existing) throw new Error('المورد غير موجود');
+  const updated = { ...existing, ...data, updated_at: nowISO() };
+  await writeRecord('suppliers', updated);
+  await addAudit('supplier', id, 'update', { before: existing, after: updated });
+  return updated;
+}
+
+export async function deleteSupplier(id) {
+  const balance = await getSupplierBalance(id);
+  if (balance !== 0) {
+    throw new Error('لا يمكن حذف مورد عليه رصيد مستحق. قم بتسوية الحساب أولاً.');
+  }
+  await updateSupplier(id, { is_deleted: true });
+  await addAudit('supplier', id, 'soft_delete', {});
+}
+
+// رصيد المورد = ما يدين به المحل له = إجمالي الآجل من فواتير الشراء - إجمالي الدفعات المسجّلة له (يُعاد حسابه دائمًا من السجل)
+export async function getSupplierBalance(supplierId) {
+  if (!supplierId) return 0;
+  const purchases = await localDb.getByIndex('purchases', 'supplier_id', supplierId);
+  const payments = await localDb.getByIndex('supplierPayments', 'supplier_id', supplierId);
+  const owedTotal = purchases.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.paid_credit || 0), 0);
+  const paidTotal = payments.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.amount || 0), 0);
+  return owedTotal - paidTotal;
+}
+
+export async function getSuppliersWithBalance() {
+  const suppliers = await getSuppliers();
+  return Promise.all(suppliers.map(async s => {
+    const purchases = (await localDb.getByIndex('purchases', 'supplier_id', s.id)).filter(p => !p.is_deleted);
+    const payments = (await localDb.getByIndex('supplierPayments', 'supplier_id', s.id)).filter(p => !p.is_deleted);
+    const balance = await getSupplierBalance(s.id);
+    const totalPurchases = purchases.reduce((sum, p) => sum + (p.total_amount || 0), 0);
+    const totalPaid = purchases.reduce((sum, p) => sum + (p.paid_cash || 0) + (p.paid_transfer || 0), 0)
+      + payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const lastInvoiceDate = purchases.reduce((max, p) => (!max || p.created_at > max ? p.created_at : max), null);
+    return { ...s, balance, totalPurchases, totalPaid, lastInvoiceDate };
+  }));
+}
+
+export async function getSupplierLedger(supplierId) {
+  const purchases = (await localDb.getByIndex('purchases', 'supplier_id', supplierId)).filter(p => !p.is_deleted && p.paid_credit > 0);
+  const payments = (await localDb.getByIndex('supplierPayments', 'supplier_id', supplierId)).filter(p => !p.is_deleted);
+  const entries = [
+    ...purchases.map(p => ({
+      type: 'purchase', id: p.id, date: p.created_at, amount: p.paid_credit,
+      label: `فاتورة شراء ${p.purchase_number}`, direction: 'debt'
+    })),
+    ...payments.map(p => ({
+      type: 'supplier_payment', id: p.id, date: p.created_at, amount: p.amount,
+      label: p.method === 'cash' ? 'دفعة نقدية' : (p.method === 'transfer' ? 'دفعة تحويل' : 'دفعة بطاقة'),
+      direction: 'payment', notes: p.notes
+    }))
+  ];
+  return entries.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// ---------- فواتير المشتريات ----------
+function computePurchaseTotals(items) {
+  let subtotal = 0;
+  const normalizedItems = items.map(it => {
+    const qty = parseFloat(it.quantity) || 0;
+    const purchasePriceCents = toCents(it.purchase_price);
+    const totalPrice = Math.round(purchasePriceCents * qty);
+    subtotal += totalPrice;
+    return {
+      id: uuid(),
+      product_id: it.product_id || null,
+      product_name: it.product_name,
+      quantity: qty,
+      unit: it.unit,
+      purchase_price: purchasePriceCents,
+      total_price: totalPrice,
+      update_cost_price: !!it.update_cost_price
+    };
+  });
+  return { normalizedItems, subtotal };
+}
+
+export async function addPurchase(payload) {
+  return withPurchaseLock(async () => {
+    if (!payload.items || !payload.items.length) throw new Error('أضف منتجًا واحدًا على الأقل');
+    const { normalizedItems, subtotal } = computePurchaseTotals(payload.items);
+
+    const discount = toCents(payload.discount || 0);
+    const extraCosts = toCents(payload.extraCosts || 0);
+    const totalAmount = Math.max(0, subtotal - discount + extraCosts);
+
+    const paidCash = toCents(payload.paidCash || 0);
+    const paidTransfer = toCents(payload.paidTransfer || 0);
+    const paidCredit = toCents(payload.paidCredit || 0);
+    const paymentSum = paidCash + paidTransfer + paidCredit;
+
+    if (Math.abs(paymentSum - totalAmount) > 1) {
+      throw new Error('مجموع طرق الدفع لا يساوي إجمالي الفاتورة');
+    }
+    if (paidCredit > 0 && !payload.supplierId) {
+      throw new Error('يجب اختيار مورد قبل تسجيل مبلغ آجل');
+    }
+
+    const { number, label } = await nextPurchaseLabel();
+    const paymentStatus = paidCredit > 0 ? (paidCash + paidTransfer > 0 ? 'partial' : 'credit') : 'paid';
+    const createdAt = payload.createdAt || nowISO();
+
+    const purchase = {
+      id: uuid(),
+      purchase_number: label,
+      purchase_seq: number,
+      supplier_invoice_number: payload.supplierInvoiceNumber || '',
+      supplier_id: payload.supplierId || null,
+      supplier_name_snapshot: payload.supplierName || 'مورد بدون اسم',
+      purchase_date: payload.purchaseDate || createdAt,
+      due_date: payload.dueDate || null,
+      subtotal, discount, extra_costs: extraCosts, total_amount: totalAmount,
+      paid_cash: paidCash, paid_transfer: paidTransfer, paid_credit: paidCredit,
+      payment_status: paymentStatus,
+      notes: payload.notes || '',
+      is_deleted: false,
+      created_by: (await getSettings()).currentUser?.name || 'مستخدم محلي',
+      created_at: createdAt,
+      updated_at: createdAt,
+      edit_history: []
+    };
+    await writeRecord('purchases', purchase);
+    for (const item of normalizedItems) {
+      item.purchase_id = purchase.id;
+      await writeRecord('purchaseItems', item);
+    }
+    if (paidCash > 0) {
+      await writeRecord('cashTransactions', {
+        id: uuid(), type: 'purchase_cash', amount: -paidCash, reference_type: 'purchase', reference_id: purchase.id,
+        notes: `شراء - ${label}`, created_at: purchase.created_at
+      });
+    }
+    await applyCostPriceUpdates(normalizedItems);
+    await addAudit('purchase', purchase.id, 'create', purchase);
+    return { purchase, items: normalizedItems };
+  });
+}
+
+// يحدّث سعر الشراء الحالي للمنتج (cost_price) فقط للأصناف المفعّل عليها تبديل "تحديث سعر شراء المنتج"
+// لا يمس هذا مطلقًا سعر الشراء المحفوظ بأصناف فواتير سابقة (كل صنف فاتورة يحتفظ بلقطة سعره وقت الشراء بشكل دائم ومستقل)
+async function applyCostPriceUpdates(items) {
+  for (const item of items) {
+    if (item.update_cost_price && item.product_id) {
+      await updateProduct(item.product_id, { cost_price: fromCents(item.purchase_price) });
+    }
+  }
+}
+
+export async function getPurchaseItems(purchaseId) {
+  return localDb.getByIndex('purchaseItems', 'purchase_id', purchaseId);
+}
+
+export async function getPurchase(id) {
+  const purchase = await localDb.getById('purchases', id);
+  if (!purchase) return null;
+  const items = await getPurchaseItems(id);
+  return { ...purchase, items };
+}
+
+export async function getPurchases({ from, to, supplierId } = {}) {
+  let rows = await localDb.getAll('purchases');
+  rows = rows.filter(p => !p.is_deleted);
+  if (from) rows = rows.filter(p => new Date(p.created_at) >= from);
+  if (to) rows = rows.filter(p => new Date(p.created_at) <= to);
+  if (supplierId) rows = rows.filter(p => p.supplier_id === supplierId);
+  return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export async function updatePurchase(id, payload) {
+  const existing = await getPurchase(id);
+  if (!existing) throw new Error('فاتورة الشراء غير موجودة');
+  const { normalizedItems, subtotal } = computePurchaseTotals(payload.items);
+
+  const discount = toCents(payload.discount || 0);
+  const extraCosts = toCents(payload.extraCosts || 0);
+  const totalAmount = Math.max(0, subtotal - discount + extraCosts);
+
+  const paidCash = toCents(payload.paidCash || 0);
+  const paidTransfer = toCents(payload.paidTransfer || 0);
+  const paidCredit = toCents(payload.paidCredit || 0);
+  if (Math.abs(paidCash + paidTransfer + paidCredit - totalAmount) > 1) {
+    throw new Error('مجموع طرق الدفع لا يساوي إجمالي الفاتورة');
+  }
+  if (paidCredit > 0 && !payload.supplierId) throw new Error('يجب اختيار مورد قبل تسجيل مبلغ آجل');
+
+  for (const old of existing.items) await localDb.remove('purchaseItems', old.id);
+  for (const item of normalizedItems) { item.purchase_id = id; await writeRecord('purchaseItems', item); }
+
+  const paymentStatus = paidCredit > 0 ? (paidCash + paidTransfer > 0 ? 'partial' : 'credit') : 'paid';
+  const updated = {
+    ...existing,
+    supplier_invoice_number: payload.supplierInvoiceNumber ?? existing.supplier_invoice_number,
+    supplier_id: payload.supplierId || null,
+    supplier_name_snapshot: payload.supplierName || existing.supplier_name_snapshot,
+    due_date: payload.dueDate ?? existing.due_date,
+    subtotal, discount, extra_costs: extraCosts, total_amount: totalAmount,
+    paid_cash: paidCash, paid_transfer: paidTransfer, paid_credit: paidCredit,
+    payment_status: paymentStatus,
+    notes: payload.notes ?? existing.notes,
+    updated_at: nowISO(),
+    edit_history: [...(existing.edit_history || []), { at: nowISO(), by: (await getSettings()).currentUser?.name || 'مستخدم محلي' }]
+  };
+  delete updated.items;
+  await writeRecord('purchases', updated);
+
+  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
+  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  if (paidCash > 0) {
+    await writeRecord('cashTransactions', {
+      id: uuid(), type: 'purchase_cash', amount: -paidCash, reference_type: 'purchase', reference_id: id,
+      notes: `تعديل فاتورة شراء - ${existing.purchase_number}`, created_at: nowISO()
+    });
+  }
+  await applyCostPriceUpdates(normalizedItems);
+  await addAudit('purchase', id, 'update', { before: existing, after: updated });
+  return updated;
+}
+
+export async function deletePurchase(id) {
+  const existing = await localDb.getById('purchases', id);
+  if (!existing) return;
+  await writeRecord('purchases', { ...existing, is_deleted: true, updated_at: nowISO() });
+  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
+  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  await addAudit('purchase', id, 'soft_delete', {});
+}
+
+// ---------- دفعات الموردين ----------
+export async function addSupplierPayment({ supplierId, purchaseId, amount, method, notes, createdAt }) {
+  if (!supplierId) throw new Error('يجب اختيار مورد');
+  const amountCents = toCents(amount);
+  if (amountCents <= 0) throw new Error('أدخل مبلغًا صحيحًا');
+  const record = {
+    id: uuid(), supplier_id: supplierId, purchase_id: purchaseId || null, amount: amountCents,
+    method: ['cash', 'transfer', 'card'].includes(method) ? method : 'cash',
+    notes: notes || '', is_deleted: false, created_at: createdAt || nowISO()
+  };
+  await writeRecord('supplierPayments', record);
+  if (record.method === 'cash') {
+    await writeRecord('cashTransactions', {
+      id: uuid(), type: 'supplier_payment_cash', amount: -amountCents, reference_type: 'supplier_payment', reference_id: record.id,
+      notes: 'دفعة نقدية لمورد', created_at: record.created_at
+    });
+  }
+  await addAudit('supplier_payment', record.id, 'create', record);
+  return record;
+}
+
+export async function getSupplierPayments({ from, to, supplierId } = {}) {
+  let rows = await localDb.getAll('supplierPayments');
+  rows = rows.filter(p => !p.is_deleted);
+  if (from) rows = rows.filter(p => new Date(p.created_at) >= from);
+  if (to) rows = rows.filter(p => new Date(p.created_at) <= to);
+  if (supplierId) rows = rows.filter(p => p.supplier_id === supplierId);
+  return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export async function deleteSupplierPayment(id) {
+  const existing = await localDb.getById('supplierPayments', id);
+  if (!existing) return;
+  await writeRecord('supplierPayments', { ...existing, is_deleted: true });
+  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'supplier_payment' && t.reference_id === id);
+  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  await addAudit('supplier_payment', id, 'soft_delete', {});
+}
+
 // ---------- الصندوق ----------
 export async function getCashSummary({ from, to } = {}) {
   const settings = await getSettings();
   const sales = await getSales({ from, to });
   const payments = await getPayments({ from, to });
   const expenses = await getExpenses({ from, to });
+  const purchases = await getPurchases({ from, to });
+  const supplierPayments = await getSupplierPayments({ from, to });
 
   const cashSales = sales.reduce((s, x) => s + (x.paid_cash || 0), 0);
   const transferSales = sales.reduce((s, x) => s + (x.paid_transfer || 0), 0);
@@ -720,12 +1038,17 @@ export async function getCashSummary({ from, to } = {}) {
   const cashPayments = payments.filter(p => p.method === 'cash').reduce((s, x) => s + x.amount, 0);
   const transferPayments = payments.filter(p => p.method === 'transfer').reduce((s, x) => s + x.amount, 0);
   const totalExpenses = expenses.reduce((s, x) => s + x.amount, 0);
+  const cashPurchases = purchases.reduce((s, x) => s + (x.paid_cash || 0), 0);
+  const transferPurchases = purchases.reduce((s, x) => s + (x.paid_transfer || 0), 0);
+  const cashSupplierPayments = supplierPayments.filter(p => p.method === 'cash').reduce((s, x) => s + x.amount, 0);
+  const transferSupplierPayments = supplierPayments.filter(p => p.method === 'transfer').reduce((s, x) => s + x.amount, 0);
 
   const opening = settings.openingCashBalance || 0;
-  const expectedCash = opening + cashSales + cashPayments - totalExpenses;
+  const expectedCash = opening + cashSales + cashPayments - totalExpenses - cashPurchases - cashSupplierPayments;
 
   return {
     opening, cashSales, transferSales, debtSales, cashPayments, transferPayments, totalExpenses,
+    cashPurchases, transferPurchases, cashSupplierPayments, transferSupplierPayments,
     expectedCash, totalCash: cashSales + cashPayments, totalTransfer: transferSales + transferPayments
   };
 }

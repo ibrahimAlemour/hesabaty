@@ -22,6 +22,8 @@ function render(container, s) {
           <tr><td>المبيعات النقدية</td><td style="text-align:left;font-weight:700;color:var(--success);">+${formatMoney(s.cashSales)}</td></tr>
           <tr><td>تحصيل ديون نقدية</td><td style="text-align:left;font-weight:700;color:var(--success);">+${formatMoney(s.cashPayments)}</td></tr>
           <tr><td>مصروفات</td><td style="text-align:left;font-weight:700;color:var(--danger);">-${formatMoney(s.totalExpenses)}</td></tr>
+          <tr><td>مشتريات نقدية</td><td style="text-align:left;font-weight:700;color:var(--danger);">-${formatMoney(s.cashPurchases || 0)}</td></tr>
+          <tr><td>دفعات نقدية للموردين</td><td style="text-align:left;font-weight:700;color:var(--danger);">-${formatMoney(s.cashSupplierPayments || 0)}</td></tr>
         </tbody>
       </table>
     </div>

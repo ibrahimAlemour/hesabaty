@@ -1,12 +1,13 @@
 // طبقة تخزين محلية باستخدام IndexedDB
 // تعرض واجهة عامة: getAll, get, put, remove, query, clear لكل مخزن (store)
 const DB_NAME = 'hesabaty-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 export const STORES = [
   'settings', 'customers', 'categories', 'products',
   'sales', 'saleItems', 'payments', 'expenses',
   'cashTransactions', 'auditLog', 'syncQueue',
-  'smsTemplates', 'smsSchedules', 'smsLog'
+  'smsTemplates', 'smsSchedules', 'smsLog',
+  'suppliers', 'purchases', 'purchaseItems', 'supplierPayments'
 ];
 
 let dbPromise = null;
@@ -69,6 +70,26 @@ function openDatabase() {
         const s = db.createObjectStore('smsLog', { keyPath: 'id' });
         s.createIndex('created_at', 'created_at');
         s.createIndex('schedule_id', 'schedule_id');
+      }
+      if (!db.objectStoreNames.contains('suppliers')) {
+        const s = db.createObjectStore('suppliers', { keyPath: 'id' });
+        s.createIndex('created_at', 'created_at');
+      }
+      if (!db.objectStoreNames.contains('purchases')) {
+        const s = db.createObjectStore('purchases', { keyPath: 'id' });
+        s.createIndex('created_at', 'created_at');
+        s.createIndex('supplier_id', 'supplier_id');
+        s.createIndex('purchase_number', 'purchase_number');
+      }
+      if (!db.objectStoreNames.contains('purchaseItems')) {
+        const s = db.createObjectStore('purchaseItems', { keyPath: 'id' });
+        s.createIndex('purchase_id', 'purchase_id');
+        s.createIndex('product_id', 'product_id');
+      }
+      if (!db.objectStoreNames.contains('supplierPayments')) {
+        const s = db.createObjectStore('supplierPayments', { keyPath: 'id' });
+        s.createIndex('created_at', 'created_at');
+        s.createIndex('supplier_id', 'supplier_id');
       }
     };
     req.onsuccess = () => resolve(req.result);

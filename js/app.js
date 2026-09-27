@@ -20,6 +20,8 @@ import { renderReports } from './reports.js';
 import { renderSettings, applyTheme } from './settings.js';
 import { renderInvoice } from './invoice.js';
 import { renderDebts } from './debts.js';
+import { renderSupplierList, renderSupplierDetail } from './suppliers.js';
+import { renderPurchaseList, renderNewPurchase, renderEditPurchase, renderPurchaseInvoice } from './purchases.js';
 import './pwa-install.js';
 
 const appContent = document.getElementById('app-content');
@@ -40,6 +42,8 @@ const MORE_ITEMS = [
   { path: '#/inventory', label: 'المخزون', icon: '📋' },
   { path: '#/categories', label: 'التصنيفات', icon: '🏷️' },
   { path: '#/debts', label: 'الديون', icon: '💳' },
+  { path: '#/suppliers', label: 'الموردون', icon: '🚚' },
+  { path: '#/purchases', label: 'فواتير المشتريات', icon: '🧾' },
   { path: '#/sms', label: 'رسائل SMS', icon: '✉️' },
   { path: '#/transfers', label: 'التحويلات', icon: '📱' },
   { path: '#/expenses', label: 'المصروفات', icon: '💸' },
@@ -57,6 +61,13 @@ const ROUTES = [
   { pattern: /^#\/inventory$/, title: 'المخزون', showBack: true, render: () => renderInventory(appContent) },
   { pattern: /^#\/categories$/, title: 'التصنيفات', showBack: true, render: () => renderCategories(appContent) },
   { pattern: /^#\/debts$/, title: 'الديون', showBack: true, render: () => renderDebts(appContent) },
+  { pattern: /^#\/suppliers$/, title: 'الموردون', showBack: true, render: () => renderSupplierList(appContent) },
+  { pattern: /^#\/suppliers\/([\w-]+)$/, title: 'حساب المورد', showBack: true, render: (m) => renderSupplierDetail(appContent, m[1]) },
+  { pattern: /^#\/purchases$/, title: 'فواتير المشتريات', showBack: true, render: () => renderPurchaseList(appContent) },
+  { pattern: /^#\/purchase\/new\/([\w-]+)$/, title: 'إضافة فاتورة شراء', showBack: true, render: (m) => renderNewPurchase(appContent, m[1]) },
+  { pattern: /^#\/purchase\/new$/, title: 'إضافة فاتورة شراء', showBack: true, render: () => renderNewPurchase(appContent) },
+  { pattern: /^#\/purchase\/edit\/([\w-]+)$/, title: 'تعديل فاتورة الشراء', showBack: true, render: (m) => renderEditPurchase(appContent, m[1]) },
+  { pattern: /^#\/purchase\/([\w-]+)$/, title: 'فاتورة الشراء', showBack: true, render: (m) => renderPurchaseInvoice(appContent, m[1]) },
   { pattern: /^#\/sms$/, title: 'رسائل SMS', showBack: true, render: () => renderSms(appContent) },
   { pattern: /^#\/transfers$/, title: 'التحويلات', showBack: true, render: () => renderTransfers(appContent) },
   { pattern: /^#\/expenses$/, title: 'المصروفات', showBack: true, render: () => renderExpenses(appContent) },

@@ -457,6 +457,106 @@ as $$
   update shops set sms_segments_total = sms_segments_total + p_amount where id = p_shop_id;
 $$;
 
+-- ---------- 18) الموردون وفواتير المشتريات (نظام مستقل تمامًا عن الزبائن والمبيعات) ----------
+-- المورد = طرف يشتري المحل منه بضاعة (عكس الزبون الذي يشتري من المحل). فاتورة الشراء ≠ فاتورة بيع أبدًا.
+alter table app_settings add column if not exists last_purchase_number integer not null default 0;
+
+create table if not exists suppliers (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  name text not null,
+  phone text,
+  address text,
+  notes text,
+  is_deleted boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_suppliers_shop on suppliers (shop_id);
+
+create table if not exists purchases (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  purchase_number text not null,   -- الترقيم الداخلي التلقائي، مثل PUR-000001
+  purchase_seq integer not null,
+  supplier_invoice_number text,    -- رقم فاتورة المورد نفسه، يُدخَل يدويًا
+  supplier_id uuid references suppliers(id),
+  supplier_name_snapshot text,
+  purchase_date timestamptz not null default now(),
+  due_date timestamptz,
+  subtotal integer not null default 0,
+  discount integer not null default 0,
+  extra_costs integer not null default 0,
+  total_amount integer not null default 0,
+  paid_cash integer not null default 0,
+  paid_transfer integer not null default 0,
+  paid_credit integer not null default 0,   -- المتبقي آجل على المحل تجاه المورد
+  payment_status text not null default 'paid' check (payment_status in ('paid', 'partial', 'credit')),
+  notes text,
+  is_deleted boolean not null default false,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  edit_history jsonb not null default '[]'::jsonb
+);
+create index if not exists idx_purchases_shop on purchases (shop_id);
+create index if not exists idx_purchases_supplier on purchases (supplier_id);
+create index if not exists idx_purchases_created on purchases (created_at);
+
+create table if not exists purchase_items (
+  id uuid primary key default gen_random_uuid(),
+  purchase_id uuid not null references purchases(id) on delete cascade,
+  shop_id uuid not null references shops(id) on delete cascade,
+  product_id uuid references products(id),
+  product_name text not null,
+  quantity numeric not null,
+  unit text not null,
+  purchase_price integer not null default 0,   -- سعر الشراء وقت هذه الفاتورة بالتحديد (لا يتغيّر لاحقًا أبدًا)
+  total_price integer not null default 0,
+  update_cost_price boolean not null default false   -- هل حُدِّث سعر شراء المنتج بناءً على هذا السطر
+);
+create index if not exists idx_purchase_items_purchase on purchase_items (purchase_id);
+
+create table if not exists supplier_payments (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  supplier_id uuid not null references suppliers(id),
+  purchase_id uuid references purchases(id),
+  amount integer not null,
+  method text not null check (method in ('cash', 'transfer', 'card')),
+  notes text,
+  is_deleted boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_supplier_payments_supplier on supplier_payments (supplier_id);
+
+alter table suppliers enable row level security;
+alter table purchases enable row level security;
+alter table purchase_items enable row level security;
+alter table supplier_payments enable row level security;
+
+-- كل جدول من الأربعة يملك سياسات SELECT/INSERT/UPDATE/DELETE كاملة (تعلّمنا من مشكلة audit_log/cash_transactions
+-- سابقًا: أي جدول ينقصه سياسة UPDATE يفشل بشكل مضمون ودائم عند إعادة محاولة رفع upsert بعد أي عطل شبكي عابر)
+create policy suppliers_isolated_select on suppliers for select using (shop_id = my_shop_id() or is_super_admin());
+create policy suppliers_isolated_insert on suppliers for insert with check (shop_id = my_shop_id());
+create policy suppliers_isolated_update on suppliers for update using (shop_id = my_shop_id() or is_super_admin());
+create policy suppliers_isolated_delete on suppliers for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+create policy purchases_isolated_select on purchases for select using (shop_id = my_shop_id() or is_super_admin());
+create policy purchases_isolated_insert on purchases for insert with check (shop_id = my_shop_id());
+create policy purchases_isolated_update on purchases for update using (shop_id = my_shop_id() or is_super_admin());
+create policy purchases_isolated_delete on purchases for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+create policy purchase_items_isolated_select on purchase_items for select using (shop_id = my_shop_id() or is_super_admin());
+create policy purchase_items_isolated_insert on purchase_items for insert with check (shop_id = my_shop_id());
+create policy purchase_items_isolated_update on purchase_items for update using (shop_id = my_shop_id() or is_super_admin());
+create policy purchase_items_isolated_delete on purchase_items for delete using (shop_id = my_shop_id() or is_super_admin());
+
+create policy supplier_payments_isolated_select on supplier_payments for select using (shop_id = my_shop_id() or is_super_admin());
+create policy supplier_payments_isolated_insert on supplier_payments for insert with check (shop_id = my_shop_id());
+create policy supplier_payments_isolated_update on supplier_payments for update using (shop_id = my_shop_id() or is_super_admin());
+create policy supplier_payments_isolated_delete on supplier_payments for delete using (shop_id = my_shop_id() or is_super_admin());
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

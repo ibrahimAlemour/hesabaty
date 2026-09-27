@@ -4,6 +4,7 @@ import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
 import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, confirmDialog, emptyState } from './ui.js';
 import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS } from './utils.js';
+import { renderAttachmentsSection } from './attachments.js';
 
 let purchaseState;
 let editingPurchaseId = null;
@@ -108,6 +109,7 @@ export async function renderEditPurchase(container, purchaseId) {
   renderPurchaseScreen(container);
   const btn = container.querySelector('#complete-purchase-btn');
   if (btn) btn.textContent = 'حفظ التعديلات';
+  renderAttachmentsSection(container, 'purchase', purchaseId);
 }
 
 function productEmoji(p, iconsMap) {
@@ -589,6 +591,7 @@ export async function renderPurchaseInvoice(container, purchaseId) {
       <button class="btn btn-danger" id="pinv-delete">حذف الفاتورة</button>
     </div>` : ''}
   `;
+  renderAttachmentsSection(container, 'purchase', purchase.id);
 
   container.querySelector('#pinv-print').onclick = () => window.print();
   container.querySelector('#pinv-share').onclick = () => sharePurchaseInvoice(purchase, settings);

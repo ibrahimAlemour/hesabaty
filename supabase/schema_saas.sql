@@ -557,6 +557,50 @@ create policy supplier_payments_isolated_insert on supplier_payments for insert 
 create policy supplier_payments_isolated_update on supplier_payments for update using (shop_id = my_shop_id() or is_super_admin());
 create policy supplier_payments_isolated_delete on supplier_payments for delete using (shop_id = my_shop_id() or is_super_admin());
 
+
+-- ---------- 19) المرفقات (صور/PDF لفواتير الشراء، جدول عام قابل لإعادة الاستخدام لاحقًا مع أي كائن آخر) ----------
+-- entity_type/entity_id بدل عمود مخصص بكل جدول - بنفس مبدأ audit_log، حتى يمكن تفعيلها لاحقًا على المبيعات/المصروفات
+-- بدون أي تعديل بقاعدة البيانات. الملف الفعلي يُخزَّن بـ Supabase Storage، وهذا الجدول يحفظ فقط بيانات الوصف (metadata).
+create table if not exists attachments (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references shops(id) on delete cascade,
+  entity_type text not null,
+  entity_id uuid not null,
+  storage_path text not null,
+  file_name text not null,
+  mime_type text,
+  size_bytes integer,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_attachments_entity on attachments (entity_type, entity_id);
+create index if not exists idx_attachments_shop on attachments (shop_id);
+
+alter table attachments enable row level security;
+create policy attachments_isolated_select on attachments for select using (shop_id = my_shop_id() or is_super_admin());
+create policy attachments_isolated_insert on attachments for insert with check (shop_id = my_shop_id());
+create policy attachments_isolated_update on attachments for update using (shop_id = my_shop_id() or is_super_admin());
+create policy attachments_isolated_delete on attachments for delete using (shop_id = my_shop_id() or is_super_admin());
+
+-- سلة تخزين خاصة (غير عامة) للملفات نفسها. المسار المتّبع دائمًا: {shop_id}/{entity_type}/{entity_id}/{filename}
+-- حتى تستطيع سياسات RLS أدناه عزل كل محل عن ملفات المحلات الأخرى بفحص أول مجلّد بالمسار فقط
+insert into storage.buckets (id, name, public)
+values ('attachments', 'attachments', false)
+on conflict (id) do nothing;
+
+create policy attachments_storage_select on storage.objects for select using (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text
+);
+create policy attachments_storage_insert on storage.objects for insert with check (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text
+);
+create policy attachments_storage_update on storage.objects for update using (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text
+);
+create policy attachments_storage_delete on storage.objects for delete using (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text
+);
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

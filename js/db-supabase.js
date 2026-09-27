@@ -172,6 +172,45 @@ export async function getAdminSettings() {
   return data || null;
 }
 
+// ---------- المرفقات (Supabase Storage + جدول attachments) ----------
+// ميزة أونلاين بحتة (على عكس باقي التطبيق أوف لاين-أولًا): الملف الفعلي لا يُخزَّن محليًا، فلا يوجد
+// معنى لتمريرها عبر db-indexeddb.js أو طابور المزامنة - كل الدوال هنا تتواصل مباشرة مع سوبابيس
+const ATTACHMENTS_BUCKET = 'attachments';
+
+export async function uploadAttachmentFile(path, file) {
+  const { error } = await supabaseClient.storage.from(ATTACHMENTS_BUCKET).upload(path, file, { upsert: false });
+  if (error) throw error;
+}
+
+export async function removeAttachmentFile(path) {
+  const { error } = await supabaseClient.storage.from(ATTACHMENTS_BUCKET).remove([path]);
+  if (error) throw error;
+}
+
+// رابط موقّع مؤقت (السلة خاصة/غير عامة) - صالح لمدة ساعة، يكفي لعرض/تحميل المرفق فور الطلب
+export async function getAttachmentSignedUrl(path, expiresInSeconds = 3600) {
+  const { data, error } = await supabaseClient.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(path, expiresInSeconds);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export async function insertAttachment(record) {
+  const { error } = await supabaseClient.from('attachments').insert(record);
+  if (error) throw error;
+}
+
+export async function getAttachments(entityType, entityId) {
+  const { data, error } = await supabaseClient.from('attachments').select('*')
+    .eq('entity_type', entityType).eq('entity_id', entityId).order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function deleteAttachmentRow(id) {
+  const { error } = await supabaseClient.from('attachments').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // تحميل مكتبة supabase-js من CDN مرة واحدة فقط عند الحاجة
 let supabaseScriptPromise = null;
 export function loadSupabaseScript() {

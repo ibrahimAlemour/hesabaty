@@ -94,12 +94,16 @@ async function ensureRemoteClient() {
 }
 
 export async function flushQueue() {
+  // فحص وتفعيل القفل يجب أن يحصلا معًا بدون أي "await" بينهما، وإلا فكل استدعاء متتالٍ سريع (مثل تعديل فاتورة
+  // واحدة يكتب فيها عدة سجلات متتابعة: الفاتورة + الأصناف + حركة الصندوق + سجل التدقيق) يمرّ من فحص "syncing"
+  // قبل أن يُفعّله الاستدعاء السابق (لأن ensureRemoteClient شبكي وبطيء)، فتُشغَّل عدة مزامنات متوازية فعليًا
+  // وكل واحدة منها تطلق تنبيه "تمت المزامنة" الخاص بها بشكل مكرر
   if (syncing) return;
   if (!navigator.onLine) return;
-  if (!(await ensureRemoteClient())) return;
   syncing = true;
-  notify('syncing');
   try {
+    if (!(await ensureRemoteClient())) return;
+    notify('syncing');
     const items = await localDb.getAll('syncQueue');
     items.sort((a, b) => a.created_at.localeCompare(b.created_at));
     for (const item of items) {

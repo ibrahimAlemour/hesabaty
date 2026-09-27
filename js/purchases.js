@@ -109,7 +109,7 @@ export async function renderEditPurchase(container, purchaseId) {
   renderPurchaseScreen(container);
   const btn = container.querySelector('#complete-purchase-btn');
   if (btn) btn.textContent = 'حفظ التعديلات';
-  renderAttachmentsSection(container, 'purchase', purchaseId);
+  renderAttachmentsSection(container.querySelector('#attachments-mount'), 'purchase', purchaseId);
 }
 
 function productEmoji(p, iconsMap) {
@@ -176,6 +176,8 @@ function renderPurchaseScreen(container) {
       <label>ملاحظات الفاتورة (اختياري)</label>
       <textarea id="p-notes" placeholder="أي ملاحظات على فاتورة الشراء">${escapeHtml(purchaseState.notes || '')}</textarea>
     </div>
+
+    <div id="attachments-mount"></div>
 
     <button class="btn btn-primary btn-block" id="complete-purchase-btn" style="padding:16px;font-size:16px;">حفظ فاتورة الشراء</button>
   `;

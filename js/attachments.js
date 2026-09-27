@@ -5,7 +5,7 @@ import * as remoteDb from './db-supabase.js';
 import { getSettings } from './database.js';
 import { getCurrentUser, canDelete } from './auth.js';
 import { uuid, nowISO, escapeHtml } from './utils.js';
-import { toastError, toastSuccess, confirmDialog, setLoading } from './ui.js';
+import { toastError, toastSuccess, confirmDialog } from './ui.js';
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 ميجابايت لكل ملف - كافٍ لصورة فاتورة بجودة جيدة بدون إبطاء الرفع
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
@@ -100,6 +100,7 @@ export async function renderAttachmentsSection(container, entityType, entityId) 
   const user = await getCurrentUser();
   const canManage = canDelete(user);
   const attachments = await getAttachmentsFor(entityType, entityId);
+  let pendingPreview = null; // معاينة فورية للصورة المختارة أثناء رفعها (قبل اكتمال الرفع الفعلي)
   renderContent();
 
   function renderContent() {
@@ -112,9 +113,15 @@ export async function renderAttachmentsSection(container, entityType, entityId) 
     }
     section.innerHTML = `
       <div class="section-title" style="margin-top:0;">📎 مرفقات الفاتورة</div>
-      ${attachments.length ? attachments.map(rowHtml).join('') : `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 10px;">لا توجد مرفقات بعد</p>`}
-      <button class="btn btn-secondary btn-block" id="add-attachment-btn">+ إضافة مرفق</button>
-      <input type="file" id="attachment-file-input" accept="image/*,application/pdf" capture="environment" style="display:none;">
+      <div class="attachments-grid" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        ${pendingPreview ? pendingPreviewHtml() : ''}
+        ${attachments.map(chipHtml).join('')}
+        <label id="add-attachment-tile" style="width:78px;height:78px;border:1.5px dashed var(--border);border-radius:var(--radius-sm);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;color:var(--primary);font-size:11px;font-weight:700;flex-shrink:0;">
+          <span style="font-size:20px;">+</span>إضافة
+          <input type="file" id="attachment-file-input" accept="image/*,application/pdf" capture="environment" style="display:none;">
+        </label>
+      </div>
+      ${!attachments.length && !pendingPreview ? `<p style="font-size:12.5px;color:var(--text-muted);margin:-4px 0 10px;">لا توجد مرفقات بعد - اضغط "+ إضافة" لرفع صورة أو PDF</p>` : ''}
     `;
     section.querySelectorAll('[data-att-open]').forEach(el => el.onclick = () => {
       const rec = attachments.find(a => a.id === el.dataset.attOpen);
@@ -137,36 +144,62 @@ export async function renderAttachmentsSection(container, entityType, entityId) 
         }
       });
     }
-    const addBtn = section.querySelector('#add-attachment-btn');
+    loadThumbnails();
+
     const fileInput = section.querySelector('#attachment-file-input');
-    addBtn.onclick = () => fileInput.click();
     fileInput.onchange = async () => {
       const file = fileInput.files[0];
       if (!file) return;
-      setLoading(addBtn, true, 'جاري الرفع...');
+      // معاينة فورية للصورة المختارة من الملفات مباشرة، قبل حتى بدء رفعها فعليًا للخادم
+      pendingPreview = { name: file.name, url: file.type.startsWith('image/') ? URL.createObjectURL(file) : null };
+      renderContent();
       try {
         const record = await uploadAttachment(entityType, entityId, file);
         attachments.push(record);
+        pendingPreview = null;
         toastSuccess('تم رفع المرفق');
         renderContent();
       } catch (err) {
+        pendingPreview = null;
         toastError(err.message || 'حدث خطأ أثناء رفع المرفق');
-        setLoading(addBtn, false);
+        renderContent();
       }
     };
   }
 
-  function rowHtml(rec) {
+  // يجلب رابطًا موقّعًا لكل صورة ويعرضها كمعاينة فعلية بدل أيقونة عامة، بلا انتظار (كل صورة تظهر فور جهوزيتها)
+  function loadThumbnails() {
+    attachments.filter(rec => (rec.mime_type || '').startsWith('image/')).forEach(async (rec) => {
+      const thumb = section.querySelector(`[data-thumb="${rec.id}"]`);
+      if (!thumb) return;
+      try {
+        const url = await remoteDb.getAttachmentSignedUrl(rec.storage_path);
+        thumb.style.backgroundImage = `url(${url})`;
+      } catch (e) { /* تبقى الأيقونة الافتراضية إن تعذّر جلب الرابط */ }
+    });
+  }
+
+  function pendingPreviewHtml() {
     return `
-      <div class="list-item" style="cursor:pointer;" data-att-open="${rec.id}">
-        <div class="avatar">${fileIcon(rec.mime_type)}</div>
-        <div class="info">
-          <div class="title">${escapeHtml(rec.file_name)}</div>
-          <div class="subtitle">${formatSize(rec.size_bytes)}</div>
+      <div style="width:78px;height:78px;border-radius:var(--radius-sm);position:relative;flex-shrink:0;background:${pendingPreview.url ? `url(${pendingPreview.url}) center/cover` : 'var(--bg)'};display:flex;align-items:center;justify-content:center;">
+        ${!pendingPreview.url ? '<span style="font-size:26px;">📄</span>' : ''}
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,.45);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;">
+          <span class="loading-spinner" style="width:20px;height:20px;border-color:#fff;border-top-color:transparent;"></span>
         </div>
-        ${canManage ? `<button class="remove-btn" data-att-delete="${rec.id}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
-        </button>` : ''}
+      </div>`;
+  }
+
+  function chipHtml(rec) {
+    const isImage = (rec.mime_type || '').startsWith('image/');
+    return `
+      <div style="width:78px;flex-shrink:0;cursor:pointer;" data-att-open="${rec.id}">
+        <div data-thumb="${rec.id}" style="width:78px;height:78px;border-radius:var(--radius-sm);background:var(--bg) center/cover;display:flex;align-items:center;justify-content:center;position:relative;border:1px solid var(--border);">
+          ${isImage ? '' : `<span style="font-size:26px;">${fileIcon(rec.mime_type)}</span>`}
+          ${canManage ? `<button class="remove-btn" data-att-delete="${rec.id}" style="position:absolute;top:-6px;left:-6px;background:var(--danger);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>` : ''}
+        </div>
+        <div style="font-size:10.5px;color:var(--text-muted);text-align:center;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(rec.file_name)}</div>
       </div>`;
   }
 }

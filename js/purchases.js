@@ -167,7 +167,7 @@ function renderPurchaseScreen(container) {
       <div class="pay-method-btn ${purchaseState.payMode==='single' && purchaseState.activeMethod==='transfer' ? 'active':''}" data-method="transfer"><span class="emoji">📱</span>تحويل</div>
       <div class="pay-method-btn ${purchaseState.payMode==='single' && purchaseState.activeMethod==='credit' ? 'active':''}" data-method="credit"><span class="emoji">📝</span>آجل</div>
     </div>
-    <button class="link-btn" id="split-pay-btn">${purchaseState.payMode === 'split' ? '✓ الدفع مقسم - تعديل' : 'تقسيم الدفع بين أكثر من طريقة'}</button>
+    ${splitPayButtonHtml(purchaseState.payMode === 'split')}
     <div id="remaining-note" style="font-size:13px;font-weight:700;color:var(--danger);margin:8px 0;"></div>
 
     <div class="form-group" style="margin-top:14px;">
@@ -301,7 +301,7 @@ function bindPurchaseScreen(container) {
     syncSingleMethodAmounts();
     container.querySelectorAll('.pay-method-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    container.querySelector('#split-pay-btn').textContent = 'تقسيم الدفع بين أكثر من طريقة';
+    setSplitPayButtonState(container, false);
     updateRemainingNote(container);
     if (btn.dataset.method === 'credit') maybeCaptureSupplier(container);
   });
@@ -350,10 +350,24 @@ function openSplitPaymentSheet(container) {
     purchaseState.payMode = 'split';
     purchaseState.split = { cash, transfer, credit };
     closeSheet();
-    container.querySelector('#split-pay-btn').textContent = '✓ الدفع مقسم - تعديل';
+    setSplitPayButtonState(container, true);
     container.querySelectorAll('.pay-method-btn').forEach(b => b.classList.remove('active'));
     updateRemainingNote(container);
   };
+}
+
+function splitPayButtonHtml(isActive) {
+  return `
+    <button id="split-pay-btn" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:var(--primary-light);border:none;border-radius:var(--radius-sm);padding:14px 16px;margin:4px 0 12px;cursor:pointer;font-family:inherit;">
+      <span style="font-size:17px;">📊</span>
+      <span id="split-pay-label" style="flex:1;text-align:center;font-weight:800;color:var(--primary-dark);font-size:14px;">${isActive ? '✓ الدفع مقسم - تعديل' : 'تقسيم الدفع على أكثر من طريقة'}</span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--primary-dark);flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+    </button>`;
+}
+
+function setSplitPayButtonState(container, isActive) {
+  const label = container.querySelector('#split-pay-label');
+  if (label) label.textContent = isActive ? '✓ الدفع مقسم - تعديل' : 'تقسيم الدفع على أكثر من طريقة';
 }
 
 function openSupplierSheet(container) {

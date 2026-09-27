@@ -596,7 +596,7 @@ export async function updateSale(id, payload) {
   }
   if (paidDebt > 0 && !payload.customerId) throw new Error('يجب اختيار زبون قبل تسجيل الدين');
 
-  for (const old of existing.items) await localDb.remove('saleItems', old.id);
+  for (const old of existing.items) await removeRecord('saleItems', old.id);
   for (const item of normalizedItems) { item.sale_id = id; await writeRecord('saleItems', item); }
 
   const paymentStatus = paidDebt > 0 ? (paidCash + paidTransfer > 0 ? 'partial' : 'debt') : 'paid';
@@ -616,7 +616,7 @@ export async function updateSale(id, payload) {
 
   // تصحيح حركة الصندوق: نحذف حركة الكاش القديمة للفاتورة ونضيف الجديدة إن وجدت
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'sale' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   if (paidCash > 0) {
     await writeRecord('cashTransactions', {
       id: uuid(), type: 'sale_cash', amount: paidCash, reference_type: 'sale', reference_id: id,
@@ -632,7 +632,7 @@ export async function deleteSale(id) {
   if (!existing) return;
   await writeRecord('sales', { ...existing, is_deleted: true, updated_at: nowISO() });
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'sale' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('sale', id, 'soft_delete', {});
 }
 
@@ -672,7 +672,7 @@ export async function deletePayment(id) {
   if (!existing) return;
   await writeRecord('payments', { ...existing, is_deleted: true });
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'payment' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('payment', id, 'soft_delete', {});
 }
 
@@ -720,7 +720,7 @@ export async function deleteExpense(id) {
   if (!existing) return;
   await writeRecord('expenses', { ...existing, is_deleted: true });
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'expense' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('expense', id, 'soft_delete', {});
 }
 
@@ -942,7 +942,7 @@ export async function updatePurchase(id, payload) {
   }
   if (paidCredit > 0 && !payload.supplierId) throw new Error('يجب اختيار مورد قبل تسجيل مبلغ آجل');
 
-  for (const old of existing.items) await localDb.remove('purchaseItems', old.id);
+  for (const old of existing.items) await removeRecord('purchaseItems', old.id);
   for (const item of normalizedItems) { item.purchase_id = id; await writeRecord('purchaseItems', item); }
 
   const paymentStatus = paidCredit > 0 ? (paidCash + paidTransfer > 0 ? 'partial' : 'credit') : 'paid';
@@ -963,7 +963,7 @@ export async function updatePurchase(id, payload) {
   await writeRecord('purchases', updated);
 
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   if (paidCash > 0) {
     await writeRecord('cashTransactions', {
       id: uuid(), type: 'purchase_cash', amount: -paidCash, reference_type: 'purchase', reference_id: id,
@@ -980,7 +980,7 @@ export async function deletePurchase(id) {
   if (!existing) return;
   await writeRecord('purchases', { ...existing, is_deleted: true, updated_at: nowISO() });
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('purchase', id, 'soft_delete', {});
 }
 
@@ -1019,7 +1019,7 @@ export async function deleteSupplierPayment(id) {
   if (!existing) return;
   await writeRecord('supplierPayments', { ...existing, is_deleted: true });
   const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'supplier_payment' && t.reference_id === id);
-  for (const t of oldCashTx) await localDb.remove('cashTransactions', t.id);
+  for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('supplier_payment', id, 'soft_delete', {});
 }
 

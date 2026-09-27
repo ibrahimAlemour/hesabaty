@@ -142,18 +142,21 @@ export async function pullFromRemote() {
   const s = await getSettings();
   if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
 
+  // هذه المخازن قابلة لتكوّن نسخ محلية "يتيمة" لا وجود لها على الخادم بعد أي تصحيح بيانات مباشر بقاعدة البيانات
+  // (مثل حذف أصناف/حركات صندوق مكررة عبر SQL)، أو بعد أي حذف/تعديل قديم لم يُرفع وقته بسبب خلل مصحَّح الآن.
+  // لذلك بعد كل سحب نطابق المحلي مع الخادم ونحذف محليًا كل صف لم يعد موجودًا هناك، ما عدا ما هو بانتظار الرفع فعليًا
+  const RECONCILE_DELETIONS_STORES = new Set(['categories', 'saleItems', 'purchaseItems', 'cashTransactions']);
+
   for (const storeName of REMOTE_PULL_STORES) {
     try {
       const rows = await remoteDb.getAll(storeName);
       if (rows.length) await localDb.bulkPut(storeName, rows);
-      // التصنيفات فقط: نحذف محليًا أي صف لم يعد موجودًا على الخادم (مثلاً بعد ترحيل SQL غيّر معرّفاتها)
-      // حتى لا تبقى نسخ قديمة معلّقة تظهر مكررة جنب نسخها الجديدة، دون التأثير على تصنيف أُضيف أوف لاين ولسا بانتظار الرفع
-      if (storeName === 'categories') {
+      if (RECONCILE_DELETIONS_STORES.has(storeName)) {
         const remoteIds = new Set(rows.map(r => r.id));
-        const pendingIds = new Set((await sync.getPendingItems()).filter(i => i.storeName === 'categories').map(i => i.payload?.id));
-        const localRows = await localDb.getAll('categories');
+        const pendingIds = new Set((await sync.getPendingItems()).filter(i => i.storeName === storeName).map(i => i.payload?.id));
+        const localRows = await localDb.getAll(storeName);
         for (const local of localRows) {
-          if (!remoteIds.has(local.id) && !pendingIds.has(local.id)) await localDb.remove('categories', local.id);
+          if (!remoteIds.has(local.id) && !pendingIds.has(local.id)) await localDb.remove(storeName, local.id);
         }
       }
     } catch (e) {

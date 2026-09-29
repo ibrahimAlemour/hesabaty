@@ -127,6 +127,17 @@ export async function updateShop(id, patch) {
   return data;
 }
 
+// يحدّث اسم/هاتف/عنوان المحل أيضًا بجدول app_settings - هذا هو ما يقرأه تطبيق المحل نفسه مباشرة ويعرضه
+// بالواجهة (اسم المحل بالرأسية...)، وهو منفصل تمامًا عن جدول shops (سجل لوحة الإدارة فقط) فلازم تحديث الاثنين معًا
+export async function updateShopAppSettings(shopId, { shopName, phone, address }) {
+  const patch = { updated_at: nowISO() };
+  if (shopName !== undefined) patch.shop_name = shopName;
+  if (phone !== undefined) patch.phone = phone;
+  if (address !== undefined) patch.address = address;
+  const { error } = await client().from('app_settings').update(patch).eq('shop_id', shopId);
+  if (error) throw error;
+}
+
 export async function setShopStatus(id, status) {
   return updateShop(id, { status });
 }

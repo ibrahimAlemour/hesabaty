@@ -429,11 +429,13 @@ function openEditShopSheet(container, shop) {
     const btn = overlay.querySelector('#es-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
+      const phone = overlay.querySelector('#es-phone').value.trim();
+      const address = overlay.querySelector('#es-address').value.trim();
       await adb.updateShop(shop.id, {
         name, owner_name: overlay.querySelector('#es-owner').value.trim(),
-        phone: overlay.querySelector('#es-phone').value.trim(), address: overlay.querySelector('#es-address').value.trim(),
-        notes: overlay.querySelector('#es-notes').value.trim()
+        phone, address, notes: overlay.querySelector('#es-notes').value.trim()
       });
+      await adb.updateShopAppSettings(shop.id, { shopName: name, phone, address });
       closeSheet();
       toastSuccess('تم تحديث بيانات المحل');
       renderShopDetail(container, shop.id);

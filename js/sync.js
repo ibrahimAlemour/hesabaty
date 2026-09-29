@@ -117,6 +117,7 @@ export async function flushQueue() {
       } catch (err) {
         item.attempts = (item.attempts || 0) + 1;
         item.lastError = err.message || String(err);
+        item.lastAttemptAt = nowISO();
         await localDb.put('syncQueue', item);
         if (item.attempts >= 5) {
           console.error('فشلت مزامنة عملية بعد عدة محاولات', item, err);

@@ -1287,9 +1287,15 @@ export async function exportBackup() {
   return { app: 'hesabaty', version: 1, exported_at: nowISO(), data };
 }
 
+// نستثني settings وsyncQueue من الاستيراد دائمًا: استيراد نسخة احتياطية (حتى من نفس المحل بوقت سابق، أو بالخطأ
+// من جهاز/حساب استُخدم لمحل آخر أثناء الاختبار) يجب أن يستعيد بيانات العمل فقط (زبائن/مبيعات/منتجات...)، ولا يغيّر
+// أبدًا هوية المحل الحالي (currentShopId) المرتبط بجلسة الدخول الفعلية على هذا الجهاز، ولا يحقن عمليات مزامنة
+// معلّقة قديمة قد تحمل shop_id مختلفًا - لأن ذلك يُنتج سجلًا بطابور المزامنة يفشل رفعه بسياسة RLS للأبد (بشكل صحيح
+// ومقصود من الخادم: يمنع تماسًا بين بيانات محلين)، بدون أي طريقة واضحة لحله غير تجاهله يدويًا
 export async function importBackup(json) {
   if (!json || json.app !== 'hesabaty' || !json.data) throw new Error('ملف النسخة الاحتياطية غير صالح');
-  await localDb.importAllData(json.data);
+  const { settings, syncQueue, ...safeData } = json.data;
+  await localDb.importAllData(safeData);
   settingsCache = null;
   await getSettings();
 }

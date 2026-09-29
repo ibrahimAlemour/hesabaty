@@ -3,7 +3,7 @@ import * as db from './database.js';
 import * as remoteDb from './db-supabase.js';
 import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut } from './auth.js';
 import { getPendingCount, getPendingItems, flushQueue, discardItem } from './sync.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, formatDateTime } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
 import { wireInstallButton, showIOSInstallInstructions } from './pwa-install.js';
@@ -87,7 +87,7 @@ export async function renderSettings(container) {
       </div>
       ${stuckError ? `
       <p style="font-size:12px;color:var(--danger);margin-top:8px;">تعذّر رفع بعض العمليات: ${escapeHtml(stuckError)}</p>
-      <p style="font-size:10.5px;color:var(--text-muted);margin-top:4px;word-break:break-all;">تشخيص: shop_id بالعملية = ${escapeHtml(String(stuckItem.payload?.shop_id))} | shop_id الحالي = ${escapeHtml(String(settings.currentShopId))} | الجدول = ${escapeHtml(stuckItem.storeName)} | العملية = ${escapeHtml(stuckItem.operation)} | المحاولات = ${stuckItem.attempts}</p>
+      <p style="font-size:10.5px;color:var(--text-muted);margin-top:4px;word-break:break-all;">تشخيص: shop_id بالعملية = ${escapeHtml(String(stuckItem.payload?.shop_id))} | shop_id الحالي = ${escapeHtml(String(settings.currentShopId))} | الجدول = ${escapeHtml(stuckItem.storeName)} | العملية = ${escapeHtml(stuckItem.operation)} | المحاولات = ${stuckItem.attempts} | آخر محاولة = ${stuckItem.lastAttemptAt ? formatDateTime(stuckItem.lastAttemptAt) : '—'}</p>
       <pre style="font-size:9.5px;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;word-break:break-all;background:var(--bg);padding:6px;border-radius:8px;max-height:120px;overflow-y:auto;">${escapeHtml(JSON.stringify(stuckItem.payload))}</pre>
       <button class="btn btn-outline btn-block" style="margin-top:8px;color:var(--danger);border-color:var(--danger);" id="st-discard-stuck">تجاهل هذه العملية العالقة نهائيًا</button>
       ` : ''}

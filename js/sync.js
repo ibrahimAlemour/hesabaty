@@ -67,9 +67,13 @@ async function setSessionInvalidFlag(value) {
 // يُرفض بصمت بسياسة RLS (Row Level Security) رغم أن المستخدم يبدو "مسجّل دخوله" بواجهة التطبيق
 async function ensureRemoteClient() {
   try {
+    const settings = await localDb.getById('settings', 'app');
+    // المستخدم غير مسجّل دخوله أصلًا (تسجيل خروج متعمّد، أو قبل أي تسجيل دخول أول مرة) حالة طبيعية متوقعة تمامًا،
+    // وليست "جلسة انتهت فجأة" - لا نُفعّل علامة sessionInvalid هنا مطلقًا لتجنّب نافذة "انتهت الجلسة" الخاطئة
+    // فور تسجيل الخروج مباشرة (قبل أن يُعاد تحميل الصفحة فعليًا وتظهر شاشة تسجيل الدخول)
+    if (!settings || !settings.currentUser) return false;
     if (!remoteDb.getClient()) {
-      const settings = await localDb.getById('settings', 'app');
-      if (!settings || settings.backendMode !== 'supabase' || !settings.supabaseUrl || !settings.supabaseAnonKey) return false;
+      if (settings.backendMode !== 'supabase' || !settings.supabaseUrl || !settings.supabaseAnonKey) return false;
       await remoteDb.loadSupabaseScript();
       await remoteDb.initSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
     }

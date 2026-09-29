@@ -151,6 +151,18 @@ export async function verifySession() {
   }
 }
 
+// يجلب auth.uid() الفعلي للجلسة الحالية مباشرة من الخادم (لا محليًا) - يُستخدم فقط لتشخيص مشاكل RLS بشاشة الإعدادات،
+// لمقارنته يدويًا مع صف profiles بلوحة سوبابيس والتأكد أن الجلسة الحالية مرتبطة فعليًا بالحساب/المحل الصحيح
+export async function getCurrentAuthUserId() {
+  if (!supabaseClient) return null;
+  try {
+    const { data } = await supabaseClient.auth.getUser();
+    return data?.user?.id || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // جدول profiles: يربط مستخدم Supabase Auth بالاسم والدور (owner/cashier/super_admin) والمحل التابع له
 export async function getProfile(userId) {
   const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).maybeSingle();

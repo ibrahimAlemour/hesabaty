@@ -15,6 +15,8 @@ export async function renderSettings(container) {
   const pendingItems = pendingSync ? await getPendingItems() : [];
   const stuckItem = pendingItems.find(i => i.lastError);
   const stuckError = stuckItem?.lastError;
+  // نجلب auth.uid() الفعلي فقط عند وجود عملية عالقة (لتشخيص مشاكل RLS)، وليس بكل فتح للشاشة
+  const liveAuthUid = stuckError && settings.backendMode === 'supabase' ? await remoteDb.getCurrentAuthUserId() : null;
 
   container.innerHTML = `
     <div class="card">
@@ -88,6 +90,8 @@ export async function renderSettings(container) {
       ${stuckError ? `
       <p style="font-size:12px;color:var(--danger);margin-top:8px;">تعذّر رفع بعض العمليات: ${escapeHtml(stuckError)}</p>
       <p style="font-size:10.5px;color:var(--text-muted);margin-top:4px;word-break:break-all;">تشخيص: shop_id بالعملية = ${escapeHtml(String(stuckItem.payload?.shop_id))} | shop_id الحالي = ${escapeHtml(String(settings.currentShopId))} | الجدول = ${escapeHtml(stuckItem.storeName)} | العملية = ${escapeHtml(stuckItem.operation)} | المحاولات = ${stuckItem.attempts} | آخر محاولة = ${stuckItem.lastAttemptAt ? formatDateTime(stuckItem.lastAttemptAt) : '—'}</p>
+      <p style="font-size:10.5px;color:var(--primary-dark);font-weight:700;margin-top:4px;word-break:break-all;">auth.uid() الفعلي لهذه الجلسة الآن = ${escapeHtml(String(liveAuthUid))}</p>
+      <p style="font-size:10px;color:var(--text-muted);margin-top:2px;">قارن هذه القيمة بعمود id بجدول profiles بلوحة سوبابيس: يجب أن يطابق حساب المالك المرتبط بـshop_id الحالي أعلاه. لو اختلف، سجّل الخروج والدخول من جديد.</p>
       <pre style="font-size:9.5px;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;word-break:break-all;background:var(--bg);padding:6px;border-radius:8px;max-height:120px;overflow-y:auto;">${escapeHtml(JSON.stringify(stuckItem.payload))}</pre>
       <button class="btn btn-outline btn-block" style="margin-top:8px;color:var(--danger);border-color:var(--danger);" id="st-discard-stuck">تجاهل هذه العملية العالقة نهائيًا</button>
       ` : ''}

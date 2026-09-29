@@ -150,6 +150,7 @@ export async function renderSupplierDetail(container, supplierId) {
 
   function ledgerRow(entry) {
     const isDebt = entry.direction === 'debt';
+    const canDeletePayment = canManage && entry.type === 'supplier_payment';
     return `
       <div class="list-item">
         <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
@@ -158,7 +159,25 @@ export async function renderSupplierDetail(container, supplierId) {
           <div class="subtitle">${formatDateTime(entry.date)}</div>
         </div>
         <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
+        ${canDeletePayment ? `<button class="remove-btn" data-ledger-delete="${entry.id}">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+        </button>` : ''}
       </div>`;
+  }
+
+  function bindLedgerClicks(root) {
+    root.querySelectorAll('[data-ledger-delete]').forEach(el => el.onclick = async (ev) => {
+      ev.stopPropagation();
+      const ok = await confirmDialog({ title: 'حذف الدفعة', message: 'سيتم حذف هذه الدفعة وستتأثر أرصدة المورد والصندوق.' });
+      if (!ok) return;
+      try {
+        await db.deleteSupplierPayment(el.dataset.ledgerDelete);
+        toastSuccess('تم حذف الدفعة');
+        renderSupplierDetail(container, supplierId);
+      } catch (err) {
+        toastError(err.message || 'حدث خطأ أثناء الحذف');
+      }
+    });
   }
 
   function renderTabContent(tab) {
@@ -192,12 +211,14 @@ export async function renderSupplierDetail(container, supplierId) {
     `);
     overlay.querySelector('[data-detail-close]').onclick = closeSheet;
     if (isInvoices) bindInvoiceClicks(overlay);
+    else bindLedgerClicks(overlay);
   }
 
   function renderActiveTab(tab) {
     const tabContentEl = container.querySelector('#tab-content');
     tabContentEl.innerHTML = renderTabContent(tab);
     if (tab === 'invoices') bindInvoiceClicks(tabContentEl);
+    else bindLedgerClicks(tabContentEl);
     const viewAllBtn = tabContentEl.querySelector('[data-view-all]');
     if (viewAllBtn) viewAllBtn.onclick = () => openFullListSheet(viewAllBtn.dataset.viewAll);
   }

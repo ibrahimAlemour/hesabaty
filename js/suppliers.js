@@ -286,7 +286,16 @@ export async function renderSupplierStatement(container, supplierId) {
     </div>
   `;
 
-  container.querySelector('#stmt-print').onclick = () => window.print();
+  container.querySelector('#stmt-print').onclick = () => {
+    // متصفحات كروم تقترح document.title كاسم افتراضي عند "حفظ كـ PDF" من نافذة الطباعة، فنغيّره مؤقتًا
+    // إلى اسم واضح (كشف حساب + اسم المورد + تاريخ اليوم) بدل عنوان الصفحة العام، ثم نعيده بعد إغلاق نافذة الطباعة
+    const originalTitle = document.title;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    document.title = `كشف حساب (${supplier.name}) (${dateStr})`;
+    const restoreTitle = () => { document.title = originalTitle; window.removeEventListener('afterprint', restoreTitle); };
+    window.addEventListener('afterprint', restoreTitle);
+    window.print();
+  };
   container.querySelector('#stmt-share').onclick = async () => {
     const text = `كشف حساب مورد - ${settings.shopName}\nالمورد: ${supplier.name}\nالرصيد الحالي المستحق: ${formatMoney(finalBalance)}\nتاريخ الإصدار: ${formatDate(new Date().toISOString())}`;
     if (navigator.share) {

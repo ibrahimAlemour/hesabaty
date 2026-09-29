@@ -3,7 +3,7 @@ import { getSettings, updateSettings, pullFromRemote } from './database.js';
 import { isLoggedIn, getCurrentUser, refreshShopStatus, signOut } from './auth.js';
 import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus, getPendingIds } from './sync.js';
 import * as remoteDb from './db-supabase.js';
-import { toastError } from './ui.js';
+import { toastError, openSheet, closeSheet } from './ui.js';
 import { renderSetupWizard } from './setup.js';
 import { renderLogin } from './login.js';
 import { renderDashboard } from './dashboard.js';
@@ -223,6 +223,50 @@ async function applySyncIconStatus(status) {
   }
   const suffix = pending > 0 ? ` (${pending} عملية بيع بانتظار الرفع)` : '';
   btn.title = (SYNC_ICON_TITLES[status] || '') + suffix;
+
+  handleSessionModal(status);
+}
+
+// نميّز صراحة بين "بدون إنترنت" (status=offline، طبيعي ومتوقع، لا نعرض شيئًا) و"جلسة دخول منتهية فعليًا"
+// (status=session_invalid، لا يُطلق إلا بعد فحص حقيقي بالخادم ينفي أن يكون السبب مجرد انقطاع شبكة عابر - راجع
+// verifySession بـsync.js) - فقط الحالة الثانية تستدعي نافذة تنبيه تطلب تسجيل الدخول من جديد
+let prevSyncStatus = null;
+let sessionModalOpen = false;
+function handleSessionModal(status) {
+  const justBecameInvalid = status === 'session_invalid' && prevSyncStatus !== 'session_invalid';
+  prevSyncStatus = status;
+  if (justBecameInvalid && !sessionModalOpen) {
+    showSessionExpiredModal();
+  } else if (status !== 'session_invalid' && sessionModalOpen) {
+    sessionModalOpen = false;
+    closeSheet();
+  }
+}
+
+function showSessionExpiredModal() {
+  sessionModalOpen = true;
+  const overlay = openSheet(`
+    <div class="confirm-box">
+      <div class="icon-circle" style="background:var(--primary-light);color:var(--primary-dark);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+      </div>
+      <h3 style="margin:0 0 4px;font-size:16.5px;font-weight:800;">انتهت جلسة الدخول</h3>
+      <p>انتهت جلسة تسجيل الدخول الخاصة بك. يرجى تسجيل الدخول مرة أخرى للمتابعة.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-4px;">بياناتك وعملياتك غير المرفوعة محفوظة بأمان على جهازك، وستُرفع تلقائيًا فور تسجيل الدخول.</p>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" data-act="close">إغلاق</button>
+        <button class="btn btn-primary" data-act="login">تسجيل الدخول</button>
+      </div>
+    </div>
+  `, { closeOnBackdrop: false });
+
+  overlay.querySelector('[data-act="close"]').onclick = () => { sessionModalOpen = false; closeSheet(); };
+  overlay.querySelector('[data-act="login"]').onclick = async () => {
+    sessionModalOpen = false;
+    closeSheet();
+    await signOut();
+    window.location.reload();
+  };
 }
 
 async function initSyncIndicator() {
@@ -233,6 +277,12 @@ async function initSyncIndicator() {
   applySyncIconStatus(await getSyncStatus());
   onSyncStatusChange(applySyncIconStatus);
 }
+
+// يعيد فحص صلاحية الجلسة فعليًا (لا فقط نستنتجها من نجاح/فشل آخر عملية) عند استعادة التطبيق من الخلفية -
+// حالة شائعة جدًا على الجوال: التطبيق يبقى مفتوحًا بالخلفية لفترة طويلة فتنتهي الجلسة دون أي محاولة كتابة تكشف ذلك
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && navigator.onLine) flushQueue();
+});
 
 backBtn.addEventListener('click', () => window.history.back());
 window.addEventListener('hashchange', router);

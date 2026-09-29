@@ -152,6 +152,16 @@ export async function clearAll() {
   for (const name of STORES) await clearStore(name);
 }
 
+// يمسح كل البيانات المحلية عدا صف الإعدادات نفسه (backendMode/رابط سوبابيس/الجلسة الحالية...) - يُستخدم عند اكتشاف
+// تبديل المحل المسجَّل دخوله على نفس الجهاز، حتى لا تبقى بيانات محل سابق (زبائن/مبيعات/ديون...) ظاهرة بجانب بيانات
+// المحل الجديد؛ التخزين المحلي بالمتصفح مشترك بين أي حسابات تسجّل دخولها لاحقًا ولا علاقة له بمعرّف المحل إطلاقًا
+export async function clearBusinessData() {
+  for (const name of STORES) {
+    if (name === 'settings') continue;
+    await clearStore(name);
+  }
+}
+
 export async function exportAllData() {
   const data = {};
   for (const name of STORES) data[name] = await getAll(name);

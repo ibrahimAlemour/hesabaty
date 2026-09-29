@@ -1,5 +1,5 @@
 // مصادقة مبسطة: حساب محلي مع تشفير كلمة مرور بسيط عبر SHA-256، أو Supabase Auth عند التفعيل
-import { getSettings, updateSettings } from './database.js';
+import { getSettings, updateSettings, clearLocalBusinessData } from './database.js';
 import { uuid } from './utils.js';
 import * as remoteDb from './db-supabase.js';
 
@@ -86,8 +86,18 @@ export async function supabaseSignIn(email, password) {
     if (shop.name) patch.shopName = shop.name;
   }
 
+  // التخزين المحلي (IndexedDB) مشترك بين أي حسابات تسجّل دخولها على نفس الجهاز/المتصفح، ولا علاقة له تلقائيًا
+  // بمعرّف المحل - فإن كان هذا الجهاز سجّل دخوله سابقًا (ولو بدورة خروج/دخول كاملة بينهما) بمحل مختلف، نمسح كل
+  // بيانات العمل القديمة أولًا، وإلا بقيت بيانات المحل السابق (زبائن/مبيعات/ديون...) ظاهرة بجانب المحل الجديد للأبد.
+  // نستخدم lastKnownShopId لا currentShopId للمقارنة لأن الأخير يُصفَّر عند تسجيل الخروج فتضيع إمكانية الاكتشاف
+  const previousSettings = await getSettings();
+  const newShopId = profile.shop_id || null;
+  if (previousSettings.lastKnownShopId && previousSettings.lastKnownShopId !== newShopId) {
+    await clearLocalBusinessData();
+  }
+
   const user = { id: profile.id, name: profile.name, role: profile.role };
-  await updateSettings({ ...patch, currentUser: user, currentShopId: profile.shop_id || null, shopStatus });
+  await updateSettings({ ...patch, currentUser: user, currentShopId: newShopId, lastKnownShopId: newShopId, shopStatus });
   sessionStorage.setItem(SESSION_KEY, user.id);
   return user;
 }

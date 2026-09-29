@@ -34,7 +34,10 @@ const DEFAULT_SETTINGS = {
   seedLoaded: false,
   currentUser: null, // { id, name, role }
   users: [], // حسابات محلية: { id, name, email, passwordHash, role }
-  currentShopId: null, // معرّف المحل بجدول shops (وضع سوبابيس فقط)
+  currentShopId: null, // معرّف المحل بجدول shops (وضع سوبابيس فقط) - يُصفَّر عند تسجيل الخروج
+  // آخر معرّف محل نجح تسجيل الدخول به فعليًا على هذا الجهاز تحديدًا - محلي بحت، لا يُصفَّر عند تسجيل الخروج (بعكس
+  // currentShopId)، حتى يمكن اكتشاف "تبديل محل" حتى بعد دورة خروج/دخول كاملة على نفس الجهاز (راجع auth.js)
+  lastKnownShopId: null,
   shopStatus: 'active', // active | suspended (يُحدَّث بعد كل تسجيل دخول عبر سوبابيس)
   updated_at: nowISO()
 };
@@ -49,6 +52,11 @@ export async function getSettings() {
   settingsCache = s;
   window.APP_SETTINGS = s;
   return s;
+}
+
+// يمسح كل بيانات العمل المحلية (يبقي صف الإعدادات نفسه) - راجع تعليق clearBusinessData بـdb-indexeddb.js للسبب
+export async function clearLocalBusinessData() {
+  await localDb.clearBusinessData();
 }
 
 export async function updateSettings(patch) {

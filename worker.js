@@ -19,12 +19,23 @@ export default {
     if (url.pathname === '/api/admin/reset-owner-password') {
       return handleResetOwnerPassword(request, env);
     }
+    if (url.pathname === '/api/admin/run-backup-now') {
+      return handleRunBackupNow(request, env);
+    }
+    if (url.pathname === '/api/admin/backup-status') {
+      return handleBackupStatus(request, env);
+    }
     return env.ASSETS.fetch(request);
   },
 
-  // يُستدعى تلقائيًا حسب جدول cron المضبوط بـ wrangler.toml (كل 15 دقيقة) - يفحص جدولات SMS المستحقة ويرسلها
+  // يُستدعى تلقائيًا حسب جدولَي cron المضبوطَين بـ wrangler.toml: كل 15 دقيقة لفحص جدولات SMS المستحقة،
+  // ومرة واحدة يوميًا (1 صباحًا UTC) لتنفيذ نسخة احتياطية كاملة - نفرّق بينهما عبر event.cron
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(processDueSmsSchedules(env));
+    if (event.cron === '0 1 * * *') {
+      ctx.waitUntil(runDailyBackup(env));
+    } else {
+      ctx.waitUntil(processDueSmsSchedules(env));
+    }
   }
 };
 
@@ -221,6 +232,104 @@ async function handleResetOwnerPassword(request, env) {
   if (!updateRes.ok) return json({ error: updateData.msg || 'فشل تحديث كلمة المرور' }, 500);
 
   return json({ ok: true });
+}
+
+// ============================================================
+// نظام النسخ الاحتياطي اليومي: يفرّغ كل الجداول الجوهرية (كل المحلات معًا) كملف JSON واحد يوميًا
+// ويخزّنه بـ Cloudflare R2 - مزوّد منفصل تمامًا عن Supabase، فتبقى النسخة محمية حتى لو حصلت مشكلة
+// بحساب Supabase نفسه (وليس فقط بصف أو جدول بداخله). لا تغطي هذه النسخة ملفات المرفقات نفسها
+// (المخزّنة بـ Supabase Storage)، فقط صفوف الجداول (بما فيها صف attachments الذي يحوي مسار كل ملف)
+// ============================================================
+
+const BACKUP_TABLES = [
+  'shops', 'profiles', 'app_settings', 'subscriptions',
+  'categories', 'customers', 'products',
+  'sales', 'sale_items', 'payments', 'expenses', 'cash_transactions',
+  'suppliers', 'purchases', 'purchase_items', 'supplier_payments', 'attachments',
+  'sms_templates', 'sms_schedules', 'sms_log'
+];
+const BACKUP_RETENTION_DAYS = 30;
+
+// يجلب كل صفوف جدول عبر ترقيم صفحات (Range) بما أن Supabase REST تعيد 1000 صف كحد أقصى بالطلب الواحد افتراضيًا
+async function fetchAllRows(table, svcHeaders) {
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&order=id.asc`, {
+      headers: { ...svcHeaders, Range: `${from}-${from + pageSize - 1}` }
+    });
+    if (!res.ok) throw new Error(`فشل جلب جدول ${table}: HTTP ${res.status}`);
+    const page = await res.json();
+    if (!Array.isArray(page) || !page.length) break;
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+  return rows;
+}
+
+async function runDailyBackup(env) {
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) return { ok: false, error: 'السرّ SUPABASE_SERVICE_ROLE_KEY غير مضبوط' };
+  if (!env.BACKUPS) return { ok: false, error: 'مساحة R2 (BACKUPS) غير مربوطة بهذا الـ Worker - راجع wrangler.toml وأنشئ الـ bucket' };
+  const svcHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+
+  const dump = { generated_at: new Date().toISOString(), tables: {} };
+  const counts = {};
+  let hadError = false;
+  for (const table of BACKUP_TABLES) {
+    try {
+      const rows = await fetchAllRows(table, svcHeaders);
+      dump.tables[table] = rows;
+      counts[table] = rows.length;
+    } catch (e) {
+      dump.tables[table] = [];
+      counts[table] = `خطأ: ${e.message}`;
+      hadError = true;
+    }
+  }
+
+  const dateStr = dump.generated_at.slice(0, 10);
+  const key = `daily/${dateStr}.json`;
+  const body = JSON.stringify(dump);
+  await env.BACKUPS.put(key, body);
+  await pruneOldBackups(env);
+
+  const status = { ok: !hadError, generated_at: dump.generated_at, key, size_bytes: body.length, counts };
+  await env.BACKUPS.put('daily/latest-status.json', JSON.stringify(status));
+  return status;
+}
+
+// يحذف النسخ الأقدم من BACKUP_RETENTION_DAYS يومًا فقط، حتى لا تتراكم المساحة إلى ما لا نهاية
+async function pruneOldBackups(env) {
+  const cutoff = Date.now() - BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const listed = await env.BACKUPS.list({ prefix: 'daily/' });
+  for (const obj of listed.objects) {
+    const m = obj.key.match(/daily\/(\d{4}-\d{2}-\d{2})\.json$/);
+    if (m && new Date(m[1]).getTime() < cutoff) {
+      await env.BACKUPS.delete(obj.key);
+    }
+  }
+}
+
+// يشغّل نسخة احتياطية فورية يدويًا (لاختبار الإعداد بدل انتظار الموعد اليومي) - صلاحية super_admin فقط
+async function handleRunBackupNow(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const auth = await requireSuperAdmin(request, env);
+  if (auth.error) return auth.error;
+  const result = await runDailyBackup(env);
+  return json(result, result.ok ? 200 : 500);
+}
+
+// يعرض حالة آخر نسخة احتياطية تمت (نجاح/فشل، الوقت، عدد صفوف كل جدول) - صلاحية super_admin فقط
+async function handleBackupStatus(request, env) {
+  const auth = await requireSuperAdmin(request, env);
+  if (auth.error) return auth.error;
+  if (!env.BACKUPS) return json({ error: 'مساحة R2 (BACKUPS) غير مربوطة بهذا الـ Worker' }, 500);
+  const obj = await env.BACKUPS.get('daily/latest-status.json');
+  if (!obj) return json({ error: 'لا يوجد أي نسخة احتياطية بعد' }, 404);
+  return json(await obj.json());
 }
 
 // ============================================================

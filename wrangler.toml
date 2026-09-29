@@ -7,6 +7,13 @@ directory = "./"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# يفحص جدولات رسائل SMS المستحقة كل 15 دقيقة (راجع دالة scheduled في worker.js)
+# جدولان: كل 15 دقيقة لفحص رسائل SMS المستحقة، ومرة يوميًا (1 صباحًا بتوقيت غرينتش) لنسخة احتياطية كاملة
+# (راجع دالة scheduled في worker.js - تفرّق بينهما عبر event.cron)
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/15 * * * *", "0 1 * * *"]
+
+# مكان تخزين النسخ الاحتياطية اليومية - منفصل تمامًا عن Supabase (مزوّد آخر) حتى تبقى محمية
+# حتى لو حصلت مشكلة بحساب Supabase نفسه. يجب إنشاء الـ bucket يدويًا قبل أول نشر (راجع تعليمات النشر)
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "hesabaty-backups"

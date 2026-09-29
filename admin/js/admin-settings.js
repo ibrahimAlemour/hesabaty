@@ -7,7 +7,10 @@ import { wireInstallButton, showIOSInstallInstructions } from '../../js/pwa-inst
 
 export async function renderAdminSettings(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
-  const [settings, admin, auditLog] = await Promise.all([adb.getAdminSettings(), getCurrentAdmin(), adb.getAuditLog(30)]);
+  const [settings, admin, auditLog, backupStatus] = await Promise.all([
+    adb.getAdminSettings(), getCurrentAdmin(), adb.getAuditLog(30),
+    adb.getBackupStatus().catch(() => null)
+  ]);
 
   container.innerHTML = `
     <div class="card">
@@ -22,6 +25,12 @@ export async function renderAdminSettings(container) {
     <div class="card">
       <div class="section-title" style="margin-top:0;">تثبيت التطبيق</div>
       <button class="btn btn-outline btn-block" id="pwa-install-btn" style="display:none;">📲 تثبيت اللوحة على الجهاز</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">النسخ الاحتياطي التلقائي</div>
+      <div id="backup-status-box">${backupStatusHtml(backupStatus)}</div>
+      <button class="btn btn-outline btn-block" id="st-run-backup" style="margin-top:10px;">تشغيل نسخة احتياطية الآن (اختبار)</button>
     </div>
 
     <div class="card">
@@ -57,6 +66,20 @@ export async function renderAdminSettings(container) {
 
   wireInstallButton(container.querySelector('#pwa-install-btn'), { onIOSInstructions: showIOSInstallInstructions });
 
+  container.querySelector('#st-run-backup').onclick = async () => {
+    const btn = container.querySelector('#st-run-backup');
+    setLoading(btn, true, 'جاري تنفيذ النسخة الاحتياطية...');
+    try {
+      const result = await adb.runBackupNow();
+      container.querySelector('#backup-status-box').innerHTML = backupStatusHtml(result);
+      if (result.ok) toastSuccess('تمت النسخة الاحتياطية بنجاح');
+      else toastError('انتهت النسخة الاحتياطية مع بعض الأخطاء، راجع التفاصيل بالأسفل');
+    } catch (err) {
+      toastError(err.message || 'فشل تشغيل النسخة الاحتياطية');
+    }
+    setLoading(btn, false);
+  };
+
   container.querySelector('#st-save').onclick = async () => {
     const btn = container.querySelector('#st-save');
     setLoading(btn, true, 'جاري الحفظ...');
@@ -72,6 +95,20 @@ export async function renderAdminSettings(container) {
     }
     setLoading(btn, false);
   };
+}
+
+function backupStatusHtml(status) {
+  if (!status) return `<p class="hint">لا يوجد أي نسخة احتياطية بعد. تُنفَّذ تلقائيًا كل يوم الساعة 1 فجرًا (بتوقيت غرينتش)، أو اضغط الزر بالأسفل لتجربتها الآن.</p>`;
+  const totalRows = Object.values(status.counts || {}).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+  const sizeKb = Math.round((status.size_bytes || 0) / 1024);
+  const failedTables = Object.entries(status.counts || {}).filter(([, v]) => typeof v !== 'number');
+  return `
+    <p class="hint" style="color:${status.ok ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)'};">
+      ${status.ok ? '✅ آخر نسخة احتياطية نجحت' : '⚠️ آخر نسخة احتياطية انتهت مع أخطاء'} - ${formatDateTime(status.generated_at)}
+    </p>
+    <p class="hint">عدد الصفوف الإجمالي: ${totalRows.toLocaleString('ar')} - الحجم: ${sizeKb.toLocaleString('ar')} كيلوبايت</p>
+    ${failedTables.length ? `<p class="hint" style="color:var(--danger, #dc2626);">جداول فشلت: ${failedTables.map(([t]) => escapeHtml(t)).join('، ')}</p>` : ''}
+  `;
 }
 
 const ACTION_LABELS = {

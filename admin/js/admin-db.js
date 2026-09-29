@@ -95,6 +95,32 @@ export async function resetOwnerPassword(shopId, newPassword) {
   return data;
 }
 
+// يشغّل نسخة احتياطية فورية الآن (بدل انتظار الموعد اليومي التلقائي) - لاختبار الإعداد أو الاطمئنان يدويًا
+export async function runBackupNow() {
+  const session = await getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/admin/run-backup-now', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}` }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل تشغيل النسخة الاحتياطية');
+  return data;
+}
+
+// يجلب حالة آخر نسخة احتياطية تمت (نجاح/فشل، الوقت، عدد صفوف كل جدول) - يرجع null إن لم تتم أي نسخة بعد
+export async function getBackupStatus() {
+  const session = await getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/admin/backup-status', {
+    headers: { Authorization: `Bearer ${session.access_token}` }
+  });
+  if (res.status === 404) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل جلب حالة النسخة الاحتياطية');
+  return data;
+}
+
 export async function updateShop(id, patch) {
   const { data, error } = await client().from('shops').update({ ...patch, updated_at: nowISO() }).eq('id', id).select().single();
   if (error) throw error;

@@ -20,7 +20,7 @@ import { renderReports } from './reports.js';
 import { renderSettings, applyTheme } from './settings.js';
 import { renderInvoice } from './invoice.js';
 import { renderDebts } from './debts.js';
-import { renderSupplierList, renderSupplierDetail } from './suppliers.js';
+import { renderSupplierList, renderSupplierDetail, renderSupplierStatement } from './suppliers.js';
 import { renderPurchaseList, renderNewPurchase, renderEditPurchase, renderPurchaseInvoice } from './purchases.js';
 import './pwa-install.js';
 
@@ -63,6 +63,7 @@ const ROUTES = [
   { pattern: /^#\/debts$/, title: 'الديون', showBack: true, render: () => renderDebts(appContent) },
   { pattern: /^#\/suppliers$/, title: 'الموردون', showBack: true, render: () => renderSupplierList(appContent) },
   { pattern: /^#\/suppliers\/([\w-]+)$/, title: 'حساب المورد', showBack: true, render: (m) => renderSupplierDetail(appContent, m[1]) },
+  { pattern: /^#\/suppliers\/([\w-]+)\/statement$/, title: 'كشف حساب المورد', showBack: true, render: (m) => renderSupplierStatement(appContent, m[1]) },
   { pattern: /^#\/purchases$/, title: 'فواتير المشتريات', showBack: true, render: () => renderPurchaseList(appContent) },
   { pattern: /^#\/purchase\/new\/([\w-]+)$/, title: 'إضافة فاتورة شراء', showBack: true, render: (m) => renderNewPurchase(appContent, m[1]) },
   { pattern: /^#\/purchase\/new$/, title: 'إضافة فاتورة شراء', showBack: true, render: () => renderNewPurchase(appContent) },

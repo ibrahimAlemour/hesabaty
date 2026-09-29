@@ -108,6 +108,10 @@ export async function renderSupplierDetail(container, supplierId) {
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
           إضافة فاتورة شراء
         </button>
+        <button class="icon-action-btn" id="statement-btn">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l3 3v17H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+          كشف حساب
+        </button>
         ${canManage ? `
         <button class="icon-action-btn" id="edit-supplier-btn">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -206,6 +210,7 @@ export async function renderSupplierDetail(container, supplierId) {
 
   container.querySelector('#record-payment-btn').onclick = () => openRecordSupplierPaymentSheet(supplier, balance, () => renderSupplierDetail(container, supplierId));
   container.querySelector('#add-purchase-btn').onclick = () => window.location.hash = `#/purchase/new/${supplier.id}`;
+  container.querySelector('#statement-btn').onclick = () => window.location.hash = `#/suppliers/${supplier.id}/statement`;
 
   if (canManage) {
     container.querySelector('#edit-supplier-btn').onclick = () => openEditSupplierSheet(supplier, () => renderSupplierDetail(container, supplierId));
@@ -221,6 +226,77 @@ export async function renderSupplierDetail(container, supplierId) {
       }
     };
   }
+}
+
+// كشف حساب قابل للطباعة/المشاركة: كل حركات المورد بترتيب تاريخي (الأقدم أولًا) مع رصيد تراكمي بعد كل حركة،
+// بنفس نمط طباعة الفاتورة الموجود بـinvoice.js/purchases.js (window.print فقط - بدون مكتبة PDF جديدة)
+export async function renderSupplierStatement(container, supplierId) {
+  container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
+  const [supplier, settings, ledgerDesc] = await Promise.all([
+    db.getSupplier(supplierId), db.getSettings(), db.getSupplierLedger(supplierId)
+  ]);
+  if (!supplier) { container.innerHTML = `<div class="card">المورد غير موجود</div>`; return; }
+
+  const ledgerAsc = [...ledgerDesc].sort((a, b) => a.date.localeCompare(b.date));
+  let running = 0;
+  const rows = ledgerAsc.map(entry => {
+    running += entry.direction === 'debt' ? entry.amount : -entry.amount;
+    return { ...entry, runningBalance: running };
+  });
+  const finalBalance = running;
+  const totalDebt = ledgerAsc.filter(e => e.direction === 'debt').reduce((s, e) => s + e.amount, 0);
+  const totalPaid = ledgerAsc.filter(e => e.direction === 'payment').reduce((s, e) => s + e.amount, 0);
+
+  container.innerHTML = `
+    <div class="card" id="statement-card">
+      <div style="text-align:center;margin-bottom:14px;">
+        <div style="font-size:20px;font-weight:800;">${escapeHtml(settings.shopName)}</div>
+        <div style="font-size:12.5px;color:var(--text-muted);">${settings.phone || ''} ${settings.address ? '- ' + escapeHtml(settings.address) : ''}</div>
+      </div>
+      <div style="text-align:center;font-weight:800;font-size:15px;margin-bottom:10px;">كشف حساب مورد</div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:10px;">
+        <span>المورد: ${escapeHtml(supplier.name)}${supplier.phone ? ' - ' + escapeHtml(supplier.phone) : ''}</span>
+        <span>تاريخ الإصدار: ${formatDate(new Date().toISOString())}</span>
+      </div>
+      ${rows.length ? `
+      <table class="simple-table">
+        <thead><tr><th>التاريخ</th><th>البيان</th><th>المبلغ</th><th>الرصيد</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td>${formatDateTime(r.date)}</td>
+              <td>${escapeHtml(r.label)}</td>
+              <td style="color:${r.direction === 'debt' ? 'var(--danger)' : 'var(--success)'};font-weight:700;">${r.direction === 'debt' ? '+' : '-'}${formatMoney(r.amount)}</td>
+              <td>${formatMoney(r.runningBalance)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      ` : emptyState('📋', 'لا توجد حركات على هذا المورد بعد')}
+      <div class="totals-box">
+        <div class="row"><span>إجمالي المشتريات الآجلة</span><span>${formatMoney(totalDebt)}</span></div>
+        <div class="row"><span>إجمالي المدفوع</span><span>${formatMoney(totalPaid)}</span></div>
+        <div class="row grand"><span>الرصيد الحالي المستحق للمورد</span><span>${formatMoney(finalBalance)}</span></div>
+      </div>
+      <div class="print-only" style="text-align:center;margin-top:16px;font-size:12px;color:#888;">كشف حساب داخلي - حساباتي</div>
+    </div>
+
+    <div class="no-print" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+      <button class="btn btn-secondary" id="stmt-print">🖨️ طباعة / حفظ PDF</button>
+      <button class="btn btn-secondary" id="stmt-share">📤 مشاركة</button>
+    </div>
+  `;
+
+  container.querySelector('#stmt-print').onclick = () => window.print();
+  container.querySelector('#stmt-share').onclick = async () => {
+    const text = `كشف حساب مورد - ${settings.shopName}\nالمورد: ${supplier.name}\nالرصيد الحالي المستحق: ${formatMoney(finalBalance)}\nتاريخ الإصدار: ${formatDate(new Date().toISOString())}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'كشف حساب مورد', text }); }
+      catch (e) { /* المستخدم أغلق نافذة المشاركة */ }
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      toastSuccess('تم نسخ ملخص كشف الحساب');
+    }
+  };
 }
 
 function closeBtnHtml() {

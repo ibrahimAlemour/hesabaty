@@ -1,6 +1,6 @@
 // Service Worker: يجعل التطبيق يعمل بالكامل بدون إنترنت (Offline-first)
-const CACHE_NAME = 'hesabaty-cache-v9';
-const RUNTIME_CACHE = 'hesabaty-runtime-v9';
+const CACHE_NAME = 'hesabaty-cache-v10';
+const RUNTIME_CACHE = 'hesabaty-runtime-v10';
 
 const APP_SHELL = [
   './',

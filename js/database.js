@@ -798,17 +798,22 @@ export async function getSuppliersWithBalance() {
   }));
 }
 
+const SUPPLIER_PAYMENT_METHOD_LABELS = { cash: 'دفعة نقدية', transfer: 'دفعة تحويل', card: 'دفعة بطاقة' };
+
+// label تبقى كما هي (نص مجمّع) لأن شاشة "سجل الحركات" الحالية تعرضها مباشرة - description/reference حقلان
+// إضافيان فقط (بدون أي تأثير على الحسابات) لعرض البيان ورقم المرجع بعمودين مستقلين بكشف الحساب
 export async function getSupplierLedger(supplierId) {
   const purchases = (await localDb.getByIndex('purchases', 'supplier_id', supplierId)).filter(p => !p.is_deleted && p.paid_credit > 0);
   const payments = (await localDb.getByIndex('supplierPayments', 'supplier_id', supplierId)).filter(p => !p.is_deleted);
   const entries = [
     ...purchases.map(p => ({
       type: 'purchase', id: p.id, date: p.created_at, amount: p.paid_credit,
-      label: `فاتورة شراء ${p.purchase_number}`, direction: 'debt'
+      label: `فاتورة شراء ${p.purchase_number}`, description: 'فاتورة شراء', reference: p.purchase_number,
+      direction: 'debt'
     })),
     ...payments.map(p => ({
       type: 'supplier_payment', id: p.id, date: p.created_at, amount: p.amount,
-      label: p.method === 'cash' ? 'دفعة نقدية' : (p.method === 'transfer' ? 'دفعة تحويل' : 'دفعة بطاقة'),
+      label: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة', description: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة', reference: null,
       direction: 'payment', notes: p.notes
     }))
   ];

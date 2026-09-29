@@ -2,7 +2,7 @@
 // نظام مستقل تمامًا عن شاشات الزبائن (customers.js): حساب ورصيد وسجل حركات وفواتير خاصة بكل مورد، بدون أي تشارك بينهما
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce } from './utils.js';
+import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, startOfDay, endOfDay } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
 
 export async function renderSupplierList(container) {
@@ -230,54 +230,105 @@ export async function renderSupplierDetail(container, supplierId) {
 
 // كشف حساب قابل للطباعة/المشاركة: كل حركات المورد بترتيب تاريخي (الأقدم أولًا) مع رصيد تراكمي بعد كل حركة،
 // بنفس نمط طباعة الفاتورة الموجود بـinvoice.js/purchases.js (window.print فقط - بدون مكتبة PDF جديدة)
-export async function renderSupplierStatement(container, supplierId) {
+function todayInputValue(d = new Date()) { return d.toISOString().slice(0, 10); }
+function firstOfMonthInputValue(d = new Date()) { return todayInputValue(new Date(d.getFullYear(), d.getMonth(), 1)); }
+
+export async function renderSupplierStatement(container, supplierId, range) {
   container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
   const [supplier, settings, ledgerDesc] = await Promise.all([
     db.getSupplier(supplierId), db.getSettings(), db.getSupplierLedger(supplierId)
   ]);
   if (!supplier) { container.innerHTML = `<div class="card">المورد غير موجود</div>`; return; }
 
+  const fromInput = range?.from || firstOfMonthInputValue();
+  const toInput = range?.to || todayInputValue();
+  const rangeStart = startOfDay(new Date(fromInput));
+  const rangeEnd = endOfDay(new Date(toInput));
+
   const ledgerAsc = [...ledgerDesc].sort((a, b) => a.date.localeCompare(b.date));
-  let running = 0;
-  const rows = ledgerAsc.map(entry => {
+  const before = ledgerAsc.filter(e => new Date(e.date) < rangeStart);
+  const inRange = ledgerAsc.filter(e => { const d = new Date(e.date); return d >= rangeStart && d <= rangeEnd; });
+
+  const openingBalance = before.reduce((s, e) => s + (e.direction === 'debt' ? e.amount : -e.amount), 0);
+  let running = openingBalance;
+  const rows = inRange.map(entry => {
     running += entry.direction === 'debt' ? entry.amount : -entry.amount;
     return { ...entry, runningBalance: running };
   });
-  const finalBalance = running;
-  const totalDebt = ledgerAsc.filter(e => e.direction === 'debt').reduce((s, e) => s + e.amount, 0);
-  const totalPaid = ledgerAsc.filter(e => e.direction === 'payment').reduce((s, e) => s + e.amount, 0);
+  const closingBalance = running;
+  const periodDebt = inRange.filter(e => e.direction === 'debt').reduce((s, e) => s + e.amount, 0);
+  const periodPaid = inRange.filter(e => e.direction === 'payment').reduce((s, e) => s + e.amount, 0);
+
+  const balanceState = closingBalance > 0
+    ? { text: 'الرصيد المستحق للمورد', color: 'var(--danger)', bg: 'var(--danger-light)', amount: closingBalance }
+    : closingBalance < 0
+      ? { text: 'رصيد لصالح المحل', color: 'var(--success)', bg: 'var(--success-light)', amount: -closingBalance }
+      : { text: 'الحساب مسدد بالكامل', color: 'var(--text-muted)', bg: 'var(--bg)', amount: 0 };
+
+  const issuedAt = formatDate(new Date().toISOString(), { year: true });
+  // نبني نص الفترة من نص التاريخ المُدخَل مباشرة (YYYY-MM-DD) بدون أي تحويل Date/منطقة زمنية، حتى لا يظهر
+  // تاريخ مختلف بيوم واحد بسبب فرق التوقيت بين حدود اليوم المحسوبة بالتوقيت المحلي للجهاز وعرضها بتوقيت غزة
+  const formatInputDate = (isoDateOnly) => { const [y, m, d] = isoDateOnly.split('-'); return `${d}/${m}/${y}`; };
+  const periodLabel = `${formatInputDate(fromInput)} - ${formatInputDate(toInput)}`;
+
+  function headerRowsHtml() {
+    // هذه الصفوف داخل <thead> عمدًا (لا كعنصر منفصل خارج الجدول): متصفحات الطباعة تكرّر <thead> تلقائيًا
+    // بأعلى كل صفحة عند تعدد الصفحات، وهذه هي الطريقة الموثوقة الوحيدة لضمان ظهور بيانات الكشف الأساسية
+    // بكل صفحة (لا يوجد ضمان مماثل لعنصر HTML عادي خارج الجدول عبر جميع المتصفحات)
+    return `
+      <tr class="stmt-head-row"><th colspan="6" style="text-align:center;font-size:18px;font-weight:800;border:none;padding-bottom:2px;">${escapeHtml(settings.shopName)}</th></tr>
+      ${settings.phone || settings.address ? `<tr class="stmt-head-row"><th colspan="6" style="text-align:center;font-weight:400;font-size:12px;color:var(--text-muted);border:none;padding-top:0;padding-bottom:10px;">${escapeHtml(settings.phone || '')}${settings.address ? ' - ' + escapeHtml(settings.address) : ''}</th></tr>` : ''}
+      <tr class="stmt-head-row"><th colspan="6" style="text-align:center;font-weight:800;font-size:15px;border:none;padding-bottom:10px;">كشف حساب مورد</th></tr>
+      <tr class="stmt-head-row">
+        <th colspan="3" style="text-align:right;font-weight:700;border:none;">المورد: ${escapeHtml(supplier.name)}${supplier.phone ? ' - ' + escapeHtml(supplier.phone) : ''}</th>
+        <th colspan="3" style="text-align:left;font-weight:400;color:var(--text-muted);border:none;">تاريخ الإصدار: ${issuedAt}</th>
+      </tr>
+      <tr class="stmt-head-row">
+        <th colspan="6" style="text-align:right;font-weight:700;border-bottom:1.5px solid var(--border);padding-bottom:10px;">الفترة: ${periodLabel}</th>
+      </tr>
+      <tr class="stmt-col-head">
+        <th>التاريخ</th><th>البيان</th><th>رقم المرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th>
+      </tr>`;
+  }
 
   container.innerHTML = `
+    <div class="no-print card" id="stmt-range-form">
+      <div class="section-title" style="margin-top:0;">فترة الكشف</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;"><label>من تاريخ</label><input type="date" id="stmt-from" value="${fromInput}"></div>
+        <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="stmt-to" value="${toInput}"></div>
+        <button class="btn btn-primary" id="stmt-apply" style="height:44px;">تطبيق</button>
+      </div>
+    </div>
+
     <div class="card" id="statement-card">
-      <div style="text-align:center;margin-bottom:14px;">
-        <div style="font-size:20px;font-weight:800;">${escapeHtml(settings.shopName)}</div>
-        <div style="font-size:12.5px;color:var(--text-muted);">${settings.phone || ''} ${settings.address ? '- ' + escapeHtml(settings.address) : ''}</div>
-      </div>
-      <div style="text-align:center;font-weight:800;font-size:15px;margin-bottom:10px;">كشف حساب مورد</div>
-      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-        <span>المورد: ${escapeHtml(supplier.name)}${supplier.phone ? ' - ' + escapeHtml(supplier.phone) : ''}</span>
-        <span>تاريخ الإصدار: ${formatDate(new Date().toISOString())}</span>
-      </div>
-      ${rows.length ? `
-      <table class="simple-table">
-        <thead><tr><th>التاريخ</th><th>البيان</th><th>المبلغ</th><th>الرصيد</th></tr></thead>
+      <table class="simple-table stmt-table">
+        <thead>${headerRowsHtml()}</thead>
         <tbody>
-          ${rows.map(r => `
+          ${rows.length ? rows.map(r => `
             <tr>
-              <td>${formatDateTime(r.date)}</td>
-              <td>${escapeHtml(r.label)}</td>
-              <td style="color:${r.direction === 'debt' ? 'var(--danger)' : 'var(--success)'};font-weight:700;">${r.direction === 'debt' ? '+' : '-'}${formatMoney(r.amount)}</td>
-              <td>${formatMoney(r.runningBalance)}</td>
-            </tr>`).join('')}
+              <td>${formatDate(r.date, { year: true })}</td>
+              <td>${escapeHtml(r.description || r.label)}</td>
+              <td>${r.reference ? escapeHtml(r.reference) : '—'}</td>
+              <td style="color:var(--danger);font-weight:700;">${r.direction === 'debt' ? formatMoney(r.amount) : '—'}</td>
+              <td style="color:var(--success);font-weight:700;">${r.direction === 'payment' ? formatMoney(r.amount) : '—'}</td>
+              <td style="font-weight:800;">${formatMoney(r.runningBalance)}</td>
+            </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px 8px;color:var(--text-muted);">لا توجد حركات خلال هذه الفترة</td></tr>`}
         </tbody>
       </table>
-      ` : emptyState('📋', 'لا توجد حركات على هذا المورد بعد')}
-      <div class="totals-box">
-        <div class="row"><span>إجمالي المشتريات الآجلة</span><span>${formatMoney(totalDebt)}</span></div>
-        <div class="row"><span>إجمالي المدفوع</span><span>${formatMoney(totalPaid)}</span></div>
-        <div class="row grand"><span>الرصيد الحالي المستحق للمورد</span><span>${formatMoney(finalBalance)}</span></div>
+
+      <div class="totals-box" style="margin-top:16px;">
+        <div class="row"><span>الرصيد السابق</span><span>${formatMoney(Math.abs(openingBalance))} ${openingBalance < 0 ? '(لصالح المحل)' : ''}</span></div>
+        <div class="row"><span>إجمالي المشتريات الآجلة (مدين)</span><span>${formatMoney(periodDebt)}</span></div>
+        <div class="row"><span>إجمالي المدفوعات (دائن)</span><span>${formatMoney(periodPaid)}</span></div>
       </div>
-      <div class="print-only" style="text-align:center;margin-top:16px;font-size:12px;color:#888;">كشف حساب داخلي - حساباتي</div>
+
+      <div style="background:${balanceState.bg};border-radius:var(--radius-sm);padding:16px;margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <span style="font-weight:800;font-size:15px;color:${balanceState.color};">${balanceState.text}</span>
+        <span style="font-weight:800;font-size:22px;color:${balanceState.color};">${formatMoney(balanceState.amount)}</span>
+      </div>
+
+      <div class="print-only" style="text-align:center;margin-top:18px;font-size:12px;color:#888;">كشف حساب للمراجعة - ليس فاتورة</div>
     </div>
 
     <div class="no-print" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
@@ -286,18 +337,25 @@ export async function renderSupplierStatement(container, supplierId) {
     </div>
   `;
 
+  container.querySelector('#stmt-apply').onclick = () => {
+    const from = container.querySelector('#stmt-from').value;
+    const to = container.querySelector('#stmt-to').value;
+    if (!from || !to) return toastError('اختر تاريخ البداية والنهاية');
+    if (from > to) return toastError('تاريخ البداية يجب أن يسبق تاريخ النهاية');
+    renderSupplierStatement(container, supplierId, { from, to });
+  };
+
   container.querySelector('#stmt-print').onclick = () => {
     // متصفحات كروم تقترح document.title كاسم افتراضي عند "حفظ كـ PDF" من نافذة الطباعة، فنغيّره مؤقتًا
     // إلى اسم واضح (كشف حساب + اسم المورد + تاريخ اليوم) بدل عنوان الصفحة العام، ثم نعيده بعد إغلاق نافذة الطباعة
     const originalTitle = document.title;
-    const dateStr = new Date().toISOString().slice(0, 10);
-    document.title = `كشف حساب (${supplier.name}) (${dateStr})`;
+    document.title = `كشف حساب (${supplier.name}) (${todayInputValue()})`;
     const restoreTitle = () => { document.title = originalTitle; window.removeEventListener('afterprint', restoreTitle); };
     window.addEventListener('afterprint', restoreTitle);
     window.print();
   };
   container.querySelector('#stmt-share').onclick = async () => {
-    const text = `كشف حساب مورد - ${settings.shopName}\nالمورد: ${supplier.name}\nالرصيد الحالي المستحق: ${formatMoney(finalBalance)}\nتاريخ الإصدار: ${formatDate(new Date().toISOString())}`;
+    const text = `كشف حساب مورد - ${settings.shopName}\nالمورد: ${supplier.name}\nالفترة: ${periodLabel}\n${balanceState.text}: ${formatMoney(balanceState.amount)}\nتاريخ الإصدار: ${issuedAt}`;
     if (navigator.share) {
       try { await navigator.share({ title: 'كشف حساب مورد', text }); }
       catch (e) { /* المستخدم أغلق نافذة المشاركة */ }

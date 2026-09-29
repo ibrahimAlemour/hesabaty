@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   supabaseAnonKey: SAAS_SUPABASE_ANON_KEY,
   lastInvoiceNumber: 0,
   lastPurchaseNumber: 0,
+  lastSupplierPaymentNumber: 0,
   openingCashBalance: 0, // بالسنت
   openingCashDate: nowISO(),
   setupCompleted: true,
@@ -89,12 +90,27 @@ function withPurchaseLock(fn) {
   return run;
 }
 
+async function nextSupplierPaymentLabel() {
+  const s = await getSettings();
+  const n = (s.lastSupplierPaymentNumber || 0) + 1;
+  await updateSettings({ lastSupplierPaymentNumber: n });
+  return { number: n, label: `PAY-${String(n).padStart(6, '0')}` };
+}
+
+// عدّاد مستقل ثالث خاص بدفعات الموردين تحديدًا (لا علاقة له بترقيم الفواتير أو المشتريات)
+let supplierPaymentMutex = Promise.resolve();
+function withSupplierPaymentLock(fn) {
+  const run = supplierPaymentMutex.then(fn, fn);
+  supplierPaymentMutex = run.catch(() => {});
+  return run;
+}
+
 // جدول app_settings بسوبابيس أسماء أعمدته snake_case، بينما الإعدادات المحلية كائن JS بأسماء camelCase
 // هذا الترابط يحوّل بين الشكلين في الاتجاهين، ويستثني الحقول المحلية البحتة (لا تُشارك بين الأجهزة)
 const SETTINGS_REMOTE_FIELDS = {
   shopName: 'shop_name', phone: 'phone', address: 'address', currency: 'currency',
   timezone: 'timezone', theme: 'theme', lastInvoiceNumber: 'last_invoice_number',
-  lastPurchaseNumber: 'last_purchase_number',
+  lastPurchaseNumber: 'last_purchase_number', lastSupplierPaymentNumber: 'last_supplier_payment_number',
   openingCashBalance: 'opening_cash_balance', openingCashDate: 'opening_cash_date'
 };
 
@@ -813,7 +829,8 @@ export async function getSupplierLedger(supplierId) {
     })),
     ...payments.map(p => ({
       type: 'supplier_payment', id: p.id, date: p.created_at, amount: p.amount,
-      label: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة', description: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة', reference: null,
+      label: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة', description: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة',
+      reference: p.payment_number || null, // دفعات مسجَّلة قبل إضافة هذا الترقيم تبقى بدون مرجع (—) بدل ترقيم رجعي غير حقيقي
       direction: 'payment', notes: p.notes
     }))
   ];
@@ -994,23 +1011,27 @@ export async function deletePurchase(id) {
 
 // ---------- دفعات الموردين ----------
 export async function addSupplierPayment({ supplierId, purchaseId, amount, method, notes, createdAt }) {
-  if (!supplierId) throw new Error('يجب اختيار مورد');
-  const amountCents = toCents(amount);
-  if (amountCents <= 0) throw new Error('أدخل مبلغًا صحيحًا');
-  const record = {
-    id: uuid(), supplier_id: supplierId, purchase_id: purchaseId || null, amount: amountCents,
-    method: ['cash', 'transfer', 'card'].includes(method) ? method : 'cash',
-    notes: notes || '', is_deleted: false, created_at: createdAt || nowISO()
-  };
-  await writeRecord('supplierPayments', record);
-  if (record.method === 'cash') {
-    await writeRecord('cashTransactions', {
-      id: uuid(), type: 'supplier_payment_cash', amount: -amountCents, reference_type: 'supplier_payment', reference_id: record.id,
-      notes: 'دفعة نقدية لمورد', created_at: record.created_at
-    });
-  }
-  await addAudit('supplier_payment', record.id, 'create', record);
-  return record;
+  return withSupplierPaymentLock(async () => {
+    if (!supplierId) throw new Error('يجب اختيار مورد');
+    const amountCents = toCents(amount);
+    if (amountCents <= 0) throw new Error('أدخل مبلغًا صحيحًا');
+    const { number, label } = await nextSupplierPaymentLabel();
+    const record = {
+      id: uuid(), payment_number: label, payment_seq: number,
+      supplier_id: supplierId, purchase_id: purchaseId || null, amount: amountCents,
+      method: ['cash', 'transfer', 'card'].includes(method) ? method : 'cash',
+      notes: notes || '', is_deleted: false, created_at: createdAt || nowISO()
+    };
+    await writeRecord('supplierPayments', record);
+    if (record.method === 'cash') {
+      await writeRecord('cashTransactions', {
+        id: uuid(), type: 'supplier_payment_cash', amount: -amountCents, reference_type: 'supplier_payment', reference_id: record.id,
+        notes: 'دفعة نقدية لمورد', created_at: record.created_at
+      });
+    }
+    await addAudit('supplier_payment', record.id, 'create', record);
+    return record;
+  });
 }
 
 export async function getSupplierPayments({ from, to, supplierId } = {}) {

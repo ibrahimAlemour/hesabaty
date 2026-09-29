@@ -601,6 +601,13 @@ create policy attachments_storage_delete on storage.objects for delete using (
   bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text
 );
 
+
+-- ---------- 20) رقم مرجعي حقيقي لدفعات الموردين (مثل PAY-000001) ----------
+-- دفعات مسجَّلة قبل هذا التعديل تبقى بدون رقم مرجعي (NULL) - كشف الحساب يعرضها بشكل "—" بدل ترقيم رجعي غير حقيقي
+alter table app_settings add column if not exists last_supplier_payment_number integer not null default 0;
+alter table supplier_payments add column if not exists payment_number text;
+alter table supplier_payments add column if not exists payment_seq integer;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

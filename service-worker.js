@@ -1,6 +1,6 @@
 // Service Worker: يجعل التطبيق يعمل بالكامل بدون إنترنت (Offline-first)
-const CACHE_NAME = 'hesabaty-cache-v12';
-const RUNTIME_CACHE = 'hesabaty-runtime-v12';
+const CACHE_NAME = 'hesabaty-cache-v13';
+const RUNTIME_CACHE = 'hesabaty-runtime-v13';
 
 const APP_SHELL = [
   './',
@@ -80,7 +80,10 @@ self.addEventListener('fetch', (event) => {
     if (request.mode === 'navigate') {
       event.respondWith(
         caches.match('./index.html').then((cached) => {
-          fetchWithTimeout(request, 4000).then((response) => {
+          // request.clone() ضروري هنا: نفس كائن Request لا يمكن استخدامه بـfetch() أكثر من مرة، وهذا التحديث
+          // بالخلفية يعمل بالتوازي مع طلب fetch احتياطي محتمل أدناه (لو لم توجد نسخة مخزّنة) على نفس الطلب الأصلي -
+          // استخدام نفس الكائن مرتين يرمي خطأً غير مُعالَج يظهر للمتصفح كـERR_FAILED فاشل تمامًا لفتح الصفحة
+          fetchWithTimeout(request.clone(), 4000).then((response) => {
             if (response && response.ok) caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', response.clone()));
           }).catch(() => {});
           return cached || fetchWithTimeout(request, 4000).catch(() => new Response('', { status: 503 }));

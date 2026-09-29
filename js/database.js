@@ -154,6 +154,22 @@ async function writeRecord(storeName, record) {
 // يسحب كل بيانات المحل من سوبابيس ويحدّث النسخة المحلية (IndexedDB) - يُستدعى بعد تسجيل الدخول وعند بدء التطبيق
 // بذلك يمكن رؤية نفس البيانات من أي جهاز جديد يسجّل دخوله بنفس الحساب
 const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog', 'smsTemplates', 'smsSchedules', 'smsLog', 'suppliers', 'purchases', 'purchaseItems', 'supplierPayments'];
+// يسحب صف إعدادات المحل فقط (اسم المحل/الهاتف/العنوان...) - خفيف جدًا (صف واحد) مقارنة بـpullFromRemote الكاملة،
+// لذلك يُستدعى بشكل متكرر (كل استعادة للتطبيق من الخلفية) بعكس السحب الكامل الذي يحدث مرة واحدة فقط لكل جلسة.
+// هذا يضمن ظهور أي تعديل من لوحة الإدارة (كتغيير اسم المحل) دون الحاجة لإغلاق التطبيق فعليًا من نظام التشغيل -
+// فعلى الجوال، "إغلاق وإعادة فتح" التطبيق من الشاشة الرئيسية غالبًا لا يوقف تنفيذ الجافاسكربت فعليًا، بل يبقيه
+// معلّقًا بالخلفية ثم يعيد إظهاره فقط (نفس الجلسة البرمجية تمامًا)، فلا تُعاد أي عملية "تحدث مرة واحدة لكل جلسة"
+export async function pullSettingsFromRemote() {
+  const s = await getSettings();
+  if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
+  try {
+    const remoteSettings = await remoteDb.getById('settings', s.currentShopId);
+    if (remoteSettings) await updateSettings(settingsFromRemote(remoteSettings));
+  } catch (e) {
+    console.error('فشل سحب إعدادات المحل من سوبابيس', e);
+  }
+}
+
 export async function pullFromRemote() {
   const s = await getSettings();
   if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
@@ -180,12 +196,7 @@ export async function pullFromRemote() {
     }
   }
 
-  try {
-    const remoteSettings = await remoteDb.getById('settings', s.currentShopId);
-    if (remoteSettings) await updateSettings(settingsFromRemote(remoteSettings));
-  } catch (e) {
-    console.error('فشل سحب إعدادات المحل من سوبابيس', e);
-  }
+  await pullSettingsFromRemote();
 }
 
 async function addAudit(entityType, entityId, action, changes) {

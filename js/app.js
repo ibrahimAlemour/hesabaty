@@ -1,5 +1,5 @@
 // نقطة الدخول: التوجيه (Router) وهيكل الصفحة العام
-import { getSettings, updateSettings, pullFromRemote } from './database.js';
+import { getSettings, updateSettings, pullFromRemote, pullSettingsFromRemote } from './database.js';
 import { isLoggedIn, getCurrentUser, refreshShopStatus, signOut } from './auth.js';
 import { initAutoSync, flushQueue, onSyncStatusChange, getSyncStatus, getPendingIds } from './sync.js';
 import * as remoteDb from './db-supabase.js';
@@ -281,8 +281,17 @@ async function initSyncIndicator() {
 
 // يعيد فحص صلاحية الجلسة فعليًا (لا فقط نستنتجها من نجاح/فشل آخر عملية) عند استعادة التطبيق من الخلفية -
 // حالة شائعة جدًا على الجوال: التطبيق يبقى مفتوحًا بالخلفية لفترة طويلة فتنتهي الجلسة دون أي محاولة كتابة تكشف ذلك
+//
+// كذلك نسحب إعدادات المحل (اسم المحل مثلاً بعد تعديله من لوحة الإدارة) في كل استعادة، لا مرة واحدة فقط لكل جلسة:
+// على الجوال "إغلاق وإعادة فتح" التطبيق من الشاشة الرئيسية غالبًا لا يوقف الجافاسكربت فعليًا (نفس الجلسة البرمجية
+// تستمر بالخلفية)، فالاعتماد فقط على سحب لمرة واحدة عند أول تحميل قد لا يتكرر أبدًا من منظور المستخدم
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && navigator.onLine) flushQueue();
+  if (document.visibilityState !== 'visible') return;
+  if (navigator.onLine) flushQueue();
+  pullSettingsFromRemote().then(() => {
+    const hash = window.location.hash;
+    if (!hash || hash === '#/' || hash === '#' || hash === '#/dashboard') router();
+  });
 });
 
 backBtn.addEventListener('click', () => window.history.back());

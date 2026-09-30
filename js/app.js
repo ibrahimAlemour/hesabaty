@@ -27,7 +27,10 @@ import './pwa-install.js';
 const appContent = document.getElementById('app-content');
 const headerTitle = document.getElementById('header-title');
 const backBtn = document.getElementById('back-btn');
-let hasPulledThisSession = false;
+// معرّف المحل الذي سُحبت بياناته الكاملة فعليًا بهذه الجلسة البرمجية - نتتبّع shop_id نفسه لا مجرّد "تم/لم يتم"،
+// حتى تُعاد عملية السحب تلقائيًا فور تبديل المحل (تسجيل خروج من محل ودخول بمحل آخر على نفس الجهاز/الجلسة)، بدل
+// أن يبقى علَم "مرة واحدة فقط" عالقًا من المحل السابق فتظهر شاشة فارغة تمامًا للمحل الجديد بعد مسح بياناته المحلية
+let pulledForShopId;
 
 const NAV_ITEMS = [
   { path: '#/dashboard', label: 'الرئيسية', icon: 'home' },
@@ -172,12 +175,12 @@ async function router() {
 
   // ننتظر أول مزامنة بعد الدخول قبل عرض أي شاشة، حتى لا تظهر بيانات افتراضية قديمة (اسم المحل مثلاً)
   // قبل أن تصل البيانات الحقيقية من سوبابيس
-  if (settings.backendMode === 'supabase' && !hasPulledThisSession) {
+  if (settings.backendMode === 'supabase' && pulledForShopId !== settings.currentShopId) {
     appContent.innerHTML = `<div style="text-align:center;padding:60px 16px;color:var(--text-muted);">
       <div class="loading-spinner" style="border-top-color:var(--primary);width:26px;height:26px;"></div>
       <p style="margin-top:14px;">جاري تحميل بيانات محلك...</p>
     </div>`;
-    hasPulledThisSession = true;
+    pulledForShopId = settings.currentShopId;
     try { await pullFromRemote(); } catch (e) { console.error('تعذر سحب البيانات من سوبابيس', e); }
   }
 

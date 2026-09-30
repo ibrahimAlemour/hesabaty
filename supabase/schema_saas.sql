@@ -608,6 +608,25 @@ alter table app_settings add column if not exists last_supplier_payment_number i
 alter table supplier_payments add column if not exists payment_number text;
 alter table supplier_payments add column if not exists payment_seq integer;
 
+-- ---------- 21) إصلاح أمني: is_owner() بسياسات profiles لم تكن مقيّدة بنفس المحل ----------
+-- is_owner() تتحقق فقط أن المستخدم الحالي دوره 'owner' بشكل عام، بدون مقارنة shop_id بالصف المستهدف إطلاقًا.
+-- هذا كان يسمح لأي صاحب محل (عبر عميل Supabase بالمتصفح مباشرة، بمفتاح anon العادي) بقراءة وتعديل صفوف
+-- profiles الخاصة بكل المحلات الأخرى في النظام كلها - وليس فقط حسابات محله. نقيّدها الآن بنفس المحل تحديدًا.
+drop policy if exists "profiles_select" on profiles;
+drop policy if exists "profiles_update_self_or_owner" on profiles;
+create policy profiles_isolated_select on profiles for select using (
+  auth.uid() = id or (is_owner() and shop_id = my_shop_id()) or is_super_admin()
+);
+create policy profiles_isolated_update on profiles for update using (
+  auth.uid() = id or (is_owner() and shop_id = my_shop_id()) or is_super_admin()
+);
+
+-- ---------- 22) حسابات كاشير حقيقية بوضع SaaS (Supabase) ----------
+-- كانت حسابات الكاشير تعمل فقط بالوضع المحلي القديم (بدون إنترنت). الآن يقدر صاحب المحل إنشاء حساب كاشير
+-- حقيقي (بريد إلكتروني + كلمة مرور) يسجّل دخوله من أي جهاز مثل أي حساب، بصلاحيات أقل (بدون أرباح/حذف).
+-- الإنشاء والحذف يتمّان فقط عبر Worker بمفتاح service_role (نفس نمط إنشاء/حذف المحل) لأن إنشاء حساب Supabase Auth
+-- وحذفه يتطلبان هذا المفتاح، ولا يمكن فعلهما مباشرة من متصفح صاحب المحل بمفتاح anon العادي.
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

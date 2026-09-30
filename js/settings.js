@@ -1,7 +1,7 @@
 // الإعدادات: بيانات المحل، المستخدمون، النسخ الاحتياطي، الاتصال بسوبابيس، الوضع الليلي
 import * as db from './database.js';
 import * as remoteDb from './db-supabase.js';
-import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut } from './auth.js';
+import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut, createSupabaseCashier, deleteSupabaseCashier, getSupabaseCashiers } from './auth.js';
 import { getPendingCount, getPendingItems, flushQueue, discardItem } from './sync.js';
 import { escapeHtml, formatDateTime } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
@@ -17,6 +17,8 @@ export async function renderSettings(container) {
   const stuckError = stuckItem?.lastError;
   // نجلب auth.uid() الفعلي فقط عند وجود عملية عالقة (لتشخيص مشاكل RLS)، وليس بكل فتح للشاشة
   const liveAuthUid = stuckError && settings.backendMode === 'supabase' ? await remoteDb.getCurrentAuthUserId() : null;
+  const isSupabase = settings.backendMode === 'supabase';
+  const supabaseCashiers = canManage && isSupabase ? await getSupabaseCashiers().catch(() => []) : [];
 
   container.innerHTML = `
     <div class="card">
@@ -46,7 +48,7 @@ export async function renderSettings(container) {
       </div>
     </div>
 
-    ${canManage && settings.backendMode !== 'supabase' ? `
+    ${canManage && !isSupabase ? `
     <div class="card">
       <div class="section-title" style="margin-top:0;">إدارة المستخدمين</div>
       <ul>
@@ -58,6 +60,22 @@ export async function renderSettings(container) {
           </li>`).join('')}
       </ul>
       <button class="btn btn-secondary btn-block" id="st-add-cashier" style="margin-top:10px;">+ إضافة حساب كاشير</button>
+    </div>
+    ` : ''}
+
+    ${canManage && isSupabase ? `
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">إدارة المستخدمين (الكاشير)</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">حساب كاشير يسجّل دخوله بالبريد وكلمة المرور من أي جهاز، لكن بدون رؤية الأرباح أو صلاحية الحذف.</p>
+      <ul>
+        ${supabaseCashiers.length ? supabaseCashiers.map(c => `
+          <li class="list-item">
+            <div class="avatar">👤</div>
+            <div class="info"><div class="title">${escapeHtml(c.name)}</div><div class="subtitle">كاشير</div></div>
+            <button class="remove-btn" data-remove-cashier="${c.id}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+          </li>`).join('') : `<li class="list-item"><div class="info"><div class="subtitle">لا يوجد حسابات كاشير بعد</div></div></li>`}
+      </ul>
+      <button class="btn btn-secondary btn-block" id="st-add-cashier-supabase" style="margin-top:10px;">+ إضافة حساب كاشير</button>
     </div>
     ` : ''}
 
@@ -144,12 +162,31 @@ function bind(container, settings) {
   const addCashierBtn = container.querySelector('#st-add-cashier');
   if (addCashierBtn) addCashierBtn.onclick = () => openAddCashierSheet(container);
 
+  const addCashierSupabaseBtn = container.querySelector('#st-add-cashier-supabase');
+  if (addCashierSupabaseBtn) addCashierSupabaseBtn.onclick = () => openAddCashierSheetSupabase(container);
+
   container.querySelectorAll('[data-remove-user]').forEach(btn => btn.onclick = async () => {
     const ok = await confirmDialog({ title: 'حذف المستخدم', message: 'هل تريد حذف هذا الحساب؟' });
     if (!ok) return;
     await removeUser(btn.dataset.removeUser);
     toastSuccess('تم حذف الحساب');
     renderSettings(container);
+  });
+
+  container.querySelectorAll('[data-remove-cashier]').forEach(btn => btn.onclick = async () => {
+    const ok = await confirmDialog({
+      title: 'حذف حساب الكاشير',
+      message: 'سيتعذّر على هذا الحساب تسجيل الدخول نهائيًا بعد الحذف. هل تريد الاستمرار؟',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await deleteSupabaseCashier(btn.dataset.removeCashier);
+      toastSuccess('تم حذف حساب الكاشير');
+      renderSettings(container);
+    } catch (err) {
+      toastError(err.message || 'فشل حذف حساب الكاشير');
+    }
   });
 
   const exportBtn = container.querySelector('#st-export');
@@ -260,6 +297,57 @@ function openAddCashierSheet(container) {
     toastSuccess('تم إضافة حساب الكاشير');
     renderSettings(container);
   };
+}
+
+async function copyToClipboard(text, label) {
+  if (!text) return;
+  try { await navigator.clipboard.writeText(text); toastSuccess(`تم نسخ ${label}`); }
+  catch (e) { toastError('تعذّر النسخ'); }
+}
+
+function openAddCashierSheetSupabase(container) {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>+ إضافة حساب كاشير</h3></div>
+    <div class="form-group"><label>الاسم</label><input type="text" id="cs-name" placeholder="اسم الكاشير"></div>
+    <div class="form-group"><label>البريد الإلكتروني</label><input type="email" id="cs-email" placeholder="example@mail.com"></div>
+    <div class="form-group"><label>كلمة المرور</label><input type="password" id="cs-password" placeholder="6 أحرف على الأقل"></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">الكاشير يسجّل دخوله بهذا البريد وكلمة المرور من أي جهاز، ولا يستطيع رؤية الأرباح أو حذف البيانات.</p>
+    <button class="btn btn-primary btn-block" id="cs-save">إضافة</button>
+  `, { onOpen: (el) => el.querySelector('#cs-name').focus() });
+
+  overlay.querySelector('#cs-save').onclick = async () => {
+    const btn = overlay.querySelector('#cs-save');
+    const name = overlay.querySelector('#cs-name').value.trim();
+    const email = overlay.querySelector('#cs-email').value.trim();
+    const password = overlay.querySelector('#cs-password').value;
+    if (!name) return toastError('أدخل الاسم');
+    if (!email) return toastError('أدخل البريد الإلكتروني');
+    if (password.length < 6) return toastError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    setLoading(btn, true, 'جاري الإضافة...');
+    try {
+      await createSupabaseCashier({ name, email, password });
+      showCashierCreatedSheet({ name, email, password });
+      toastSuccess('تم إضافة حساب الكاشير');
+      renderSettings(container);
+    } catch (err) {
+      toastError(err.message || 'فشل إضافة حساب الكاشير');
+      setLoading(btn, false);
+    }
+  };
+}
+
+function showCashierCreatedSheet({ name, email, password }) {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>تم إنشاء حساب ${escapeHtml(name)}</h3></div>
+    <p style="font-size:13px;color:var(--text-muted);">شارك هذه البيانات مع الكاشير ليسجّل دخوله بها. كلمة المرور لن تظهر مرة أخرى بعد إغلاق هذه الشاشة.</p>
+    <div class="form-group"><label>البريد الإلكتروني</label><input type="text" id="cc-email" value="${escapeHtml(email)}" readonly></div>
+    <div class="form-group"><label>كلمة المرور</label><input type="text" id="cc-password" value="${escapeHtml(password)}" readonly></div>
+    <button class="btn btn-outline btn-block" id="cc-copy">نسخ البريد وكلمة المرور</button>
+    <button class="btn btn-primary btn-block" style="margin-top:8px;" id="cc-close">تم</button>
+  `, { closeOnBackdrop: false });
+
+  overlay.querySelector('#cc-copy').onclick = () => copyToClipboard(`${email}\n${password}`, 'بيانات الدخول');
+  overlay.querySelector('#cc-close').onclick = () => closeSheet();
 }
 
 export function applyTheme(theme) {

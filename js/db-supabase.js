@@ -170,6 +170,14 @@ export async function getProfile(userId) {
   return data || null;
 }
 
+// حسابات الكاشير التابعة لمحل المستخدم الحالي فقط - تعتمد كليًا على سياسة RLS المعزولة بنفس المحل
+// (profiles_isolated_select) لمنع رؤية حسابات محلات أخرى، وليس على أي فلترة يدوية هنا
+export async function getShopCashiers() {
+  const { data, error } = await supabaseClient.from('profiles').select('*').eq('role', 'cashier');
+  if (error) throw error;
+  return data || [];
+}
+
 // بيانات المحل (للتحقق من حالة التعليق) ورسالة التواصل العامة
 export async function getShop(shopId) {
   if (!shopId) return null;

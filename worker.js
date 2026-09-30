@@ -25,6 +25,12 @@ export default {
     if (url.pathname === '/api/admin/backup-status') {
       return handleBackupStatus(request, env);
     }
+    if (url.pathname === '/api/shop/create-cashier') {
+      return handleCreateCashier(request, env);
+    }
+    if (url.pathname === '/api/shop/delete-cashier') {
+      return handleDeleteCashier(request, env);
+    }
     return env.ASSETS.fetch(request);
   },
 
@@ -73,6 +79,99 @@ async function requireSuperAdmin(request, env) {
   }
 
   return { serviceKey, svcHeaders };
+}
+
+// يتحقق أن الطلب صادر من مستخدم مسجّل دخوله فعليًا بدور owner لمحل حقيقي، ويرجع shop_id الخاص به - يُستخدم قبل
+// أي عملية تخص حسابات الكاشير (إنشاء/حذف)، لأنها تتطلب مفتاح service_role (إنشاء/حذف حساب Supabase Auth)
+// ولا يمكن فعلها مباشرة من متصفح صاحب المحل بمفتاح anon العادي
+async function requireShopOwner(request, env) {
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) return { error: json({ error: 'الخادم غير مهيأ بعد: أضف SUPABASE_SERVICE_ROLE_KEY كسرّ (Secret) من إعدادات Cloudflare Workers' }, 500) };
+
+  const authHeader = request.headers.get('Authorization') || '';
+  const callerToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (!callerToken) return { error: json({ error: 'غير مصرح: لا يوجد رمز جلسة' }, 401) };
+
+  const callerRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: serviceKey, Authorization: `Bearer ${callerToken}` }
+  });
+  if (!callerRes.ok) return { error: json({ error: 'جلسة الدخول غير صالحة، سجّل الدخول من جديد' }, 401) };
+  const callerUser = await callerRes.json();
+
+  const svcHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' };
+
+  const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${callerUser.id}&select=role,shop_id`, { headers: svcHeaders });
+  const callerProfiles = await profileRes.json();
+  const callerProfile = Array.isArray(callerProfiles) ? callerProfiles[0] : null;
+  if (!callerProfile || callerProfile.role !== 'owner' || !callerProfile.shop_id) {
+    return { error: json({ error: 'هذا الحساب لا يملك صلاحية صاحب المحل' }, 403) };
+  }
+
+  return { serviceKey, svcHeaders, shopId: callerProfile.shop_id };
+}
+
+// إنشاء حساب كاشير حقيقي (بريد إلكتروني + كلمة مرور) مرتبط بمحل صاحب الحساب المتصل تحديدًا، بدور 'cashier'
+async function handleCreateCashier(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  const auth = await requireShopOwner(request, env);
+  if (auth.error) return auth.error;
+  const { svcHeaders, shopId } = auth;
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'بيانات الطلب غير صالحة' }, 400); }
+  const { name, email, password } = body || {};
+
+  if (!name || !String(name).trim()) return json({ error: 'أدخل اسم الكاشير' }, 400);
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'أدخل بريدًا إلكترونيًا صحيحًا' }, 400);
+  if (!password || String(password).length < 6) return json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' }, 400);
+
+  const createUserRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+    method: 'POST', headers: svcHeaders,
+    body: JSON.stringify({ email, password, email_confirm: true })
+  });
+  const newUser = await createUserRes.json();
+  if (!createUserRes.ok) {
+    return json({ error: newUser.msg || newUser.error_description || newUser.message || 'فشل إنشاء حساب الدخول (ربما البريد مستخدم من قبل)' }, 400);
+  }
+
+  const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+    method: 'POST', headers: { ...svcHeaders, Prefer: 'return=representation' },
+    body: JSON.stringify({ id: newUser.id, name: String(name).trim(), role: 'cashier', shop_id: shopId })
+  });
+  if (!profileRes.ok) {
+    // نحذف حساب الدخول فورًا لو فشل إنشاء صف profiles، حتى لا يبقى حساب دخول معلّق بلا صف مرتبط به
+    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${newUser.id}`, { method: 'DELETE', headers: svcHeaders });
+    return json({ error: 'فشل إنشاء ملف تعريف الكاشير' }, 500);
+  }
+
+  return json({ email, password });
+}
+
+// حذف حساب كاشير نهائيًا - نتأكد أولاً أنه ينتمي فعليًا لنفس محل صاحب الحساب المتصل (لا يمرّر أي id عشوائي)
+async function handleDeleteCashier(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  const auth = await requireShopOwner(request, env);
+  if (auth.error) return auth.error;
+  const { svcHeaders, shopId } = auth;
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'بيانات الطلب غير صالحة' }, 400); }
+  const { cashierId } = body || {};
+  if (!cashierId) return json({ error: 'معرّف الكاشير مفقود' }, 400);
+
+  const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${cashierId}&select=shop_id,role`, { headers: svcHeaders });
+  const rows = await checkRes.json();
+  const target = Array.isArray(rows) ? rows[0] : null;
+  if (!target || target.shop_id !== shopId || target.role !== 'cashier') {
+    return json({ error: 'هذا الحساب غير موجود أو لا ينتمي لمحلك' }, 404);
+  }
+
+  const deleteRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${cashierId}`, { method: 'DELETE', headers: svcHeaders });
+  if (!deleteRes.ok) return json({ error: 'فشل حذف حساب الكاشير' }, 500);
+
+  return json({ ok: true });
 }
 
 async function handleCreateShop(request, env) {

@@ -36,6 +36,38 @@ export async function removeUser(userId) {
   await updateSettings({ users });
 }
 
+// حساب كاشير حقيقي (بريد إلكتروني + كلمة مرور) بوضع سوبابيس - عبر Worker بمفتاح service_role
+// (إنشاء/حذف حساب Supabase Auth لا يمكن فعله مباشرة من المتصفح بمفتاح anon العادي - راجع worker.js)
+export async function createSupabaseCashier({ name, email, password }) {
+  const session = await remoteDb.getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/shop/create-cashier', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ name, email, password })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل إنشاء حساب الكاشير');
+  return data;
+}
+
+export async function deleteSupabaseCashier(cashierId) {
+  const session = await remoteDb.getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/shop/delete-cashier', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ cashierId })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل حذف حساب الكاشير');
+  return data;
+}
+
+export async function getSupabaseCashiers() {
+  return remoteDb.getShopCashiers();
+}
+
 export async function localSignIn(identifier, password) {
   const settings = await getSettings();
   const passwordHash = await hashPassword(password);

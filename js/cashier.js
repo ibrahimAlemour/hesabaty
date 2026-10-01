@@ -49,7 +49,23 @@ export async function renderCashierCustomerList(container) {
 
 function renderCustomerListView(container, customers, query) {
   const filtered = query ? customers.filter(c => fuzzyMatch(c.name, query) || (c.phone && c.phone.includes(query))) : customers;
+  const monthlyCount = customers.filter(c => c.payment_cycle === 'monthly').length;
+  const weeklyCount = customers.filter(c => c.payment_cycle === 'weekly').length;
   container.innerHTML = `
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <div class="stat-card" style="flex:1;align-items:center;text-align:center;">
+        <div class="stat-label">👥 الكل</div>
+        <div class="stat-value">${customers.length}</div>
+      </div>
+      <div class="stat-card" style="flex:1;align-items:center;text-align:center;">
+        <div class="stat-label">🗓️ شهري</div>
+        <div class="stat-value">${monthlyCount}</div>
+      </div>
+      <div class="stat-card" style="flex:1;align-items:center;text-align:center;">
+        <div class="stat-label">🗓️ أسبوعي</div>
+        <div class="stat-value">${weeklyCount}</div>
+      </div>
+    </div>
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="cashier-customer-search" placeholder="ابحث بالاسم أو الهاتف..." value="${escapeHtml(query)}">
@@ -62,12 +78,17 @@ function renderCustomerListView(container, customers, query) {
   container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/customers/${el.dataset.open}`; });
 }
 
+function cashierCycleBadge(customer) {
+  const cycle = customer.payment_cycle && db.PAYMENT_CYCLES[customer.payment_cycle];
+  return cycle ? `<span class="badge" style="background:var(--blue-light);color:var(--blue);margin-right:6px;">🗓️ ${cycle.label}</span>` : '';
+}
+
 function cashierCustomerRow(c) {
   return `
     <div class="list-item" style="cursor:pointer;" data-open="${c.id}">
       <div class="avatar">${escapeHtml(c.name[0])}</div>
       <div class="info">
-        <div class="title">${escapeHtml(c.name)}</div>
+        <div class="title">${escapeHtml(c.name)} ${cashierCycleBadge(c)}</div>
         <div class="subtitle">${c.phone || 'بدون رقم هاتف'}</div>
       </div>
       <div style="text-align:left;">

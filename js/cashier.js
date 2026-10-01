@@ -75,6 +75,8 @@ function renderCustomerListView(container, customers, query) {
     </div>
   `;
   container.querySelector('#cashier-customer-search').oninput = debounce((e) => renderCustomerListView(container, customers, e.target.value), 150);
+  container.querySelector('#cashier-customer-search').focus();
+  container.querySelector('#cashier-customer-search').setSelectionRange(query.length, query.length);
   container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/customers/${el.dataset.open}`; });
 }
 
@@ -162,6 +164,8 @@ function renderSupplierListView(container, suppliers, query) {
     </div>
   `;
   container.querySelector('#cashier-supplier-search').oninput = debounce((e) => renderSupplierListView(container, suppliers, e.target.value), 150);
+  container.querySelector('#cashier-supplier-search').focus();
+  container.querySelector('#cashier-supplier-search').setSelectionRange(query.length, query.length);
   container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/suppliers/${el.dataset.open}`; });
 }
 

@@ -22,6 +22,10 @@ import { renderInvoice } from './invoice.js';
 import { renderDebts } from './debts.js';
 import { renderSupplierList, renderSupplierDetail, renderSupplierStatement } from './suppliers.js';
 import { renderPurchaseList, renderNewPurchase, renderEditPurchase, renderPurchaseInvoice } from './purchases.js';
+import {
+  renderCashierHome, renderCashierCustomerList, renderCashierCustomerDetail,
+  renderCashierSupplierList, renderCashierSupplierDetail
+} from './cashier.js';
 import './pwa-install.js';
 
 const appContent = document.getElementById('app-content');
@@ -31,6 +35,8 @@ const backBtn = document.getElementById('back-btn');
 // حتى تُعاد عملية السحب تلقائيًا فور تبديل المحل (تسجيل خروج من محل ودخول بمحل آخر على نفس الجهاز/الجلسة)، بدل
 // أن يبقى علَم "مرة واحدة فقط" عالقًا من المحل السابق فتظهر شاشة فارغة تمامًا للمحل الجديد بعد مسح بياناته المحلية
 let pulledForShopId;
+// آخر حالة بُني عليها الشريط السفلي/القائمة الجانبية (عادي أو كاشير) - لتجنّب إعادة بنائهما بلا داعٍ بكل تنقّل
+let navBuiltForCashier;
 
 const NAV_ITEMS = [
   { path: '#/dashboard', label: 'الرئيسية', icon: 'home' },
@@ -39,6 +45,19 @@ const NAV_ITEMS = [
   { path: '#/reports', label: 'التقارير', icon: 'chart' },
   { path: '#/more', label: 'المزيد', icon: 'menu' }
 ];
+
+// واجهة كاشير مبسّطة ومؤقتة: عرض فقط لحسابات الزبائن والتجار، بدون أي شاشات أو إجراءات مالية/إدارية أخرى
+// (راجع js/cashier.js - معزول تمامًا عن واجهة المالك ولا يؤثر عليها)
+const CASHIER_NAV_ITEMS = [
+  { path: '#/dashboard', label: 'الرئيسية', icon: 'home' },
+  { path: '#/more', label: 'المزيد', icon: 'menu' }
+];
+const CASHIER_MORE_ITEMS = [
+  { path: '#/customers', label: 'الزبائن', icon: '👥' },
+  { path: '#/suppliers', label: 'التجار', icon: '🚚' }
+];
+// أي مسار آخر يحاول الكاشير فتحه (عبر رابط قديم أو تعديل يدوي للرابط) يُعاد توجيهه للرئيسية فورًا
+const CASHIER_ALLOWED_HASH = /^#\/(dashboard|more|customers(\/[\w-]+)?|suppliers(\/[\w-]+)?(\/statement)?|purchase\/[\w-]+)$/;
 
 const MORE_ITEMS = [
   { path: '#/products', label: 'المنتجات', icon: '📦' },
@@ -55,17 +74,17 @@ const MORE_ITEMS = [
 ];
 
 const ROUTES = [
-  { pattern: /^#\/dashboard$/, title: 'حساباتي', render: () => renderDashboard(appContent) },
+  { pattern: /^#\/dashboard$/, title: 'حساباتي', render: (m, isCashier) => isCashier ? renderCashierHome(appContent) : renderDashboard(appContent) },
   { pattern: /^#\/sale\/new$/, title: 'بيع جديد', showBack: true, render: () => renderNewSale(appContent) },
   { pattern: /^#\/sale\/edit\/([\w-]+)$/, title: 'تعديل الفاتورة', showBack: true, render: (m) => renderEditSale(appContent, m[1]) },
-  { pattern: /^#\/customers$/, title: 'الزبائن', render: () => renderCustomerList(appContent) },
-  { pattern: /^#\/customers\/([\w-]+)$/, title: 'حساب الزبون', showBack: true, render: (m) => renderCustomerDetail(appContent, m[1]) },
+  { pattern: /^#\/customers$/, title: 'الزبائن', render: (m, isCashier) => isCashier ? renderCashierCustomerList(appContent) : renderCustomerList(appContent) },
+  { pattern: /^#\/customers\/([\w-]+)$/, title: 'حساب الزبون', showBack: true, render: (m, isCashier) => isCashier ? renderCashierCustomerDetail(appContent, m[1]) : renderCustomerDetail(appContent, m[1]) },
   { pattern: /^#\/products$/, title: 'المنتجات', showBack: true, render: () => renderProductList(appContent) },
   { pattern: /^#\/inventory$/, title: 'المخزون', showBack: true, render: () => renderInventory(appContent) },
   { pattern: /^#\/categories$/, title: 'التصنيفات', showBack: true, render: () => renderCategories(appContent) },
   { pattern: /^#\/debts$/, title: 'الديون', showBack: true, render: () => renderDebts(appContent) },
-  { pattern: /^#\/suppliers$/, title: 'الموردون', showBack: true, render: () => renderSupplierList(appContent) },
-  { pattern: /^#\/suppliers\/([\w-]+)$/, title: 'حساب المورد', showBack: true, render: (m) => renderSupplierDetail(appContent, m[1]) },
+  { pattern: /^#\/suppliers$/, title: 'الموردون', showBack: true, render: (m, isCashier) => isCashier ? renderCashierSupplierList(appContent) : renderSupplierList(appContent) },
+  { pattern: /^#\/suppliers\/([\w-]+)$/, title: 'حساب المورد', showBack: true, render: (m, isCashier) => isCashier ? renderCashierSupplierDetail(appContent, m[1]) : renderSupplierDetail(appContent, m[1]) },
   { pattern: /^#\/suppliers\/([\w-]+)\/statement$/, title: 'كشف حساب المورد', showBack: true, render: (m) => renderSupplierStatement(appContent, m[1]) },
   { pattern: /^#\/purchases$/, title: 'فواتير المشتريات', showBack: true, render: () => renderPurchaseList(appContent) },
   { pattern: /^#\/purchase\/new\/([\w-]+)$/, title: 'إضافة فاتورة شراء', showBack: true, render: (m) => renderNewPurchase(appContent, m[1]) },
@@ -79,7 +98,7 @@ const ROUTES = [
   { pattern: /^#\/reports$/, title: 'التقارير', render: () => renderReports(appContent) },
   { pattern: /^#\/settings$/, title: 'الإعدادات', showBack: true, render: () => renderSettings(appContent) },
   { pattern: /^#\/invoice\/([\w-]+)$/, title: 'الفاتورة', showBack: true, render: (m) => renderInvoice(appContent, m[1]) },
-  { pattern: /^#\/more$/, title: 'المزيد', render: () => renderMore(appContent) }
+  { pattern: /^#\/more$/, title: 'المزيد', render: (m, isCashier) => renderMore(appContent, isCashier) }
 ];
 
 async function renderSuspendedScreen(container) {
@@ -104,11 +123,12 @@ async function renderSuspendedScreen(container) {
   };
 }
 
-function renderMore(container) {
+function renderMore(container, isCashier) {
+  const items = isCashier ? CASHIER_MORE_ITEMS : MORE_ITEMS;
   container.innerHTML = `
     <div class="card" style="padding:6px;">
       <ul>
-        ${MORE_ITEMS.map(i => `
+        ${items.map(i => `
           <li class="list-item" style="cursor:pointer;" data-nav="${i.path}">
             <div class="avatar" style="background:var(--bg);font-size:19px;">${i.icon}</div>
             <div class="info"><div class="title">${i.label}</div></div>
@@ -173,6 +193,19 @@ async function router() {
   document.getElementById('login-root').innerHTML = '';
   document.getElementById('setup-root').innerHTML = '';
 
+  // واجهة كاشير مبسّطة ومؤقتة (راجع js/cashier.js): نحصر المسارات المسموحة ونبني شريطًا سفليًا مختصرًا فقط لهذا الدور،
+  // دون أي تأثير على واجهة المالك (نفس المسارات والشريط الأصليين تمامًا لأي دور آخر)
+  const currentUser = await getCurrentUser();
+  const isCashier = !!(currentUser && currentUser.role === 'cashier');
+  if (navBuiltForCashier !== isCashier) {
+    navBuiltForCashier = isCashier;
+    buildNav(isCashier);
+  }
+  if (isCashier && !CASHIER_ALLOWED_HASH.test(hash)) {
+    navigate('#/dashboard');
+    return;
+  }
+
   // ننتظر أول مزامنة بعد الدخول قبل عرض أي شاشة، حتى لا تظهر بيانات افتراضية قديمة (اسم المحل مثلاً)
   // قبل أن تصل البيانات الحقيقية من سوبابيس
   if (settings.backendMode === 'supabase' && pulledForShopId !== settings.currentShopId) {
@@ -190,7 +223,7 @@ async function router() {
       headerTitle.textContent = route.title;
       backBtn.style.display = route.showBack ? 'flex' : 'none';
       try {
-        await route.render(m);
+        await route.render(m, isCashier);
       } catch (err) {
         console.error(err);
         toastError('حدث خطأ أثناء تحميل الصفحة. حاول مرة أخرى.');
@@ -317,9 +350,11 @@ function iconSvg(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${paths[name] || ''}</svg>`;
 }
 
-function buildNav() {
+function buildNav(isCashier) {
+  const navItems = isCashier ? CASHIER_NAV_ITEMS : NAV_ITEMS;
+  const moreItems = isCashier ? CASHIER_MORE_ITEMS : MORE_ITEMS;
   const nav = document.getElementById('bottom-nav');
-  nav.innerHTML = NAV_ITEMS.map(item => {
+  nav.innerHTML = navItems.map(item => {
     if (item.isFab) {
       return `<a href="${item.path}" class="nav-fab"><span class="nav-fab-btn">${iconSvg('plus')}</span></a>`;
     }
@@ -328,7 +363,7 @@ function buildNav() {
 
   const sidebar = document.getElementById('desktop-sidebar-links');
   if (sidebar) {
-    sidebar.innerHTML = [...NAV_ITEMS.filter(i => !i.isFab), ...MORE_ITEMS.map(i => ({ path: i.path, label: i.label, icon: null, emoji: i.icon }))]
+    sidebar.innerHTML = [...navItems.filter(i => !i.isFab), ...moreItems.map(i => ({ path: i.path, label: i.label, icon: null, emoji: i.icon }))]
       .map(item => `<a href="${item.path}">${item.icon ? iconSvg(item.icon) : `<span style="width:19px;text-align:center;">${item.emoji}</span>`}<span>${item.label}</span></a>`).join('');
   }
 }

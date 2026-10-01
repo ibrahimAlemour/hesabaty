@@ -129,10 +129,10 @@ export async function renderSettings(container) {
     <button class="btn btn-secondary btn-block" id="st-logout">تسجيل الخروج</button>
   `;
 
-  bind(container, settings);
+  bind(container, settings, supabaseCashiers);
 }
 
-function bind(container, settings) {
+function bind(container, settings, supabaseCashiers) {
   wireInstallButton(container.querySelector('#pwa-install-btn'), { onIOSInstructions: showIOSInstallInstructions });
 
   container.querySelector('#st-save-shop').onclick = async () => {
@@ -179,8 +179,14 @@ function bind(container, settings) {
   });
 
   container.querySelectorAll('[data-edit-cashier]').forEach(btn => btn.onclick = () => {
-    const cashier = supabaseCashiers.find(c => c.id === btn.dataset.editCashier);
-    if (cashier) openCashierDetailSheet(container, cashier);
+    try {
+      const cashier = supabaseCashiers.find(c => c.id === btn.dataset.editCashier);
+      if (!cashier) { toastError('تعذّر إيجاد بيانات هذا الكاشير، أعد فتح الإعدادات وحاول مجددًا'); return; }
+      openCashierDetailSheet(container, cashier);
+    } catch (err) {
+      console.error('فشل فتح شاشة تعديل الكاشير', err);
+      toastError('حدث خطأ غير متوقع: ' + (err.message || String(err)));
+    }
   });
 
   container.querySelectorAll('[data-remove-cashier]').forEach(btn => btn.onclick = async () => {

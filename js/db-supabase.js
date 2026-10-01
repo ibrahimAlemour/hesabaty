@@ -178,6 +178,11 @@ export async function getShopCashiers() {
   return data || [];
 }
 
+export async function updateCashierProfile(cashierId, patch) {
+  const { error } = await supabaseClient.from('profiles').update(patch).eq('id', cashierId).eq('role', 'cashier');
+  if (error) throw error;
+}
+
 // بيانات المحل (للتحقق من حالة التعليق) ورسالة التواصل العامة
 export async function getShop(shopId) {
   if (!shopId) return null;

@@ -31,6 +31,12 @@ export default {
     if (url.pathname === '/api/shop/delete-cashier') {
       return handleDeleteCashier(request, env);
     }
+    if (url.pathname === '/api/shop/get-cashier-email') {
+      return handleGetCashierEmail(request, env);
+    }
+    if (url.pathname === '/api/shop/reset-cashier-password') {
+      return handleResetCashierPassword(request, env);
+    }
     return env.ASSETS.fetch(request);
   },
 
@@ -149,6 +155,15 @@ async function handleCreateCashier(request, env) {
 }
 
 // حذف حساب كاشير نهائيًا - نتأكد أولاً أنه ينتمي فعليًا لنفس محل صاحب الحساب المتصل (لا يمرّر أي id عشوائي)
+// يتأكد أن cashierId فعلاً حساب كاشير تابع لنفس محل صاحب الحساب المتصل - يمنع أي تمرير يدوي لـid حساب بمحل آخر.
+// تُستخدم قبل أي عملية تخص حساب كاشير محدَّد (حذف/عرض بريد/تغيير كلمة مرور)
+async function verifyCashierOwnership(cashierId, shopId, svcHeaders) {
+  const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${cashierId}&select=shop_id,role`, { headers: svcHeaders });
+  const rows = await checkRes.json();
+  const target = Array.isArray(rows) ? rows[0] : null;
+  return !!(target && target.shop_id === shopId && target.role === 'cashier');
+}
+
 async function handleDeleteCashier(request, env) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
@@ -161,15 +176,61 @@ async function handleDeleteCashier(request, env) {
   const { cashierId } = body || {};
   if (!cashierId) return json({ error: 'معرّف الكاشير مفقود' }, 400);
 
-  const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${cashierId}&select=shop_id,role`, { headers: svcHeaders });
-  const rows = await checkRes.json();
-  const target = Array.isArray(rows) ? rows[0] : null;
-  if (!target || target.shop_id !== shopId || target.role !== 'cashier') {
+  if (!(await verifyCashierOwnership(cashierId, shopId, svcHeaders))) {
     return json({ error: 'هذا الحساب غير موجود أو لا ينتمي لمحلك' }, 404);
   }
 
   const deleteRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${cashierId}`, { method: 'DELETE', headers: svcHeaders });
   if (!deleteRes.ok) return json({ error: 'فشل حذف حساب الكاشير' }, 500);
+
+  return json({ ok: true });
+}
+
+// يجلب بريد حساب كاشير معيّن (مخزّن فقط بنظام Supabase Auth، غير موجود بجدول profiles، فلا يمكن قراءته إلا هنا)
+async function handleGetCashierEmail(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const auth = await requireShopOwner(request, env);
+  if (auth.error) return auth.error;
+  const { svcHeaders, shopId } = auth;
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'بيانات الطلب غير صالحة' }, 400); }
+  const { cashierId } = body || {};
+  if (!cashierId) return json({ error: 'معرّف الكاشير مفقود' }, 400);
+
+  if (!(await verifyCashierOwnership(cashierId, shopId, svcHeaders))) {
+    return json({ error: 'هذا الحساب غير موجود أو لا ينتمي لمحلك' }, 404);
+  }
+
+  const userRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${cashierId}`, { headers: svcHeaders });
+  const userData = await userRes.json();
+  if (!userRes.ok) return json({ error: userData.msg || 'فشل جلب بيانات الحساب' }, 500);
+
+  return json({ email: userData.email || '' });
+}
+
+// يعيّن كلمة مرور جديدة لحساب كاشير. كلمة المرور القديمة غير قابلة للاسترجاع أبدًا (مُخزَّنة مُشفّرة) - الحل الوحيد تعيين كلمة جديدة
+async function handleResetCashierPassword(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const auth = await requireShopOwner(request, env);
+  if (auth.error) return auth.error;
+  const { svcHeaders, shopId } = auth;
+
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'بيانات الطلب غير صالحة' }, 400); }
+  const { cashierId, newPassword } = body || {};
+  if (!cashierId) return json({ error: 'معرّف الكاشير مفقود' }, 400);
+  if (!newPassword || String(newPassword).length < 6) return json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' }, 400);
+
+  if (!(await verifyCashierOwnership(cashierId, shopId, svcHeaders))) {
+    return json({ error: 'هذا الحساب غير موجود أو لا ينتمي لمحلك' }, 404);
+  }
+
+  const updateRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${cashierId}`, {
+    method: 'PUT', headers: svcHeaders, body: JSON.stringify({ password: newPassword })
+  });
+  const updateData = await updateRes.json();
+  if (!updateRes.ok) return json({ error: updateData.msg || 'فشل تحديث كلمة المرور' }, 500);
 
   return json({ ok: true });
 }

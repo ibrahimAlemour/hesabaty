@@ -1,7 +1,11 @@
 // الإعدادات: بيانات المحل، المستخدمون، النسخ الاحتياطي، الاتصال بسوبابيس، الوضع الليلي
 import * as db from './database.js';
 import * as remoteDb from './db-supabase.js';
-import { getCurrentUser, canDelete, addCashierAccount, removeUser, signOut, createSupabaseCashier, deleteSupabaseCashier, getSupabaseCashiers } from './auth.js';
+import {
+  getCurrentUser, canDelete, addCashierAccount, removeUser, signOut,
+  createSupabaseCashier, deleteSupabaseCashier, getSupabaseCashiers,
+  getCashierEmail, resetCashierPassword, updateCashierName
+} from './auth.js';
 import { getPendingCount, getPendingItems, flushQueue, discardItem } from './sync.js';
 import { escapeHtml, formatDateTime } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
@@ -69,7 +73,7 @@ export async function renderSettings(container) {
       <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">حساب كاشير يسجّل دخوله بالبريد وكلمة المرور من أي جهاز، لكن بدون رؤية الأرباح أو صلاحية الحذف.</p>
       <ul>
         ${supabaseCashiers.length ? supabaseCashiers.map(c => `
-          <li class="list-item">
+          <li class="list-item" style="cursor:pointer;" data-open-cashier="${c.id}">
             <div class="avatar">👤</div>
             <div class="info"><div class="title">${escapeHtml(c.name)}</div><div class="subtitle">كاشير</div></div>
             <button class="remove-btn" data-remove-cashier="${c.id}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
@@ -173,7 +177,13 @@ function bind(container, settings) {
     renderSettings(container);
   });
 
-  container.querySelectorAll('[data-remove-cashier]').forEach(btn => btn.onclick = async () => {
+  container.querySelectorAll('[data-open-cashier]').forEach(row => row.onclick = () => {
+    const cashier = supabaseCashiers.find(c => c.id === row.dataset.openCashier);
+    if (cashier) openCashierDetailSheet(container, cashier);
+  });
+
+  container.querySelectorAll('[data-remove-cashier]').forEach(btn => btn.onclick = async (ev) => {
+    ev.stopPropagation();
     const ok = await confirmDialog({
       title: 'حذف حساب الكاشير',
       message: 'سيتعذّر على هذا الحساب تسجيل الدخول نهائيًا بعد الحذف. هل تريد الاستمرار؟',
@@ -348,6 +358,81 @@ function showCashierCreatedSheet({ name, email, password }) {
 
   overlay.querySelector('#cc-copy').onclick = () => copyToClipboard(`${email}\n${password}`, 'بيانات الدخول');
   overlay.querySelector('#cc-close').onclick = () => closeSheet();
+}
+
+const COPY_ICON_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+
+function openCashierDetailSheet(container, cashier) {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>بيانات الكاشير</h3></div>
+    <div class="form-group"><label>الاسم</label><input type="text" id="cd-name" value="${escapeHtml(cashier.name)}"></div>
+    <button class="btn btn-primary btn-block" id="cd-save-name">حفظ الاسم</button>
+
+    <div class="divider-label">حساب الدخول</div>
+    <div class="form-group">
+      <label>البريد الإلكتروني</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="cd-email" value="جاري التحميل..." readonly style="flex:1;">
+        <button type="button" class="icon-btn" id="cd-copy-email" title="نسخ البريد">${COPY_ICON_SVG}</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>كلمة المرور</label>
+      <p class="hint" style="margin:0 0 8px;">كلمة المرور الحالية غير قابلة للعرض أبدًا لأي جهة (تُخزَّن مُشفّرة). يمكنك بدلًا من ذلك تعيين كلمة مرور جديدة:</p>
+      <input type="text" id="cd-new-password" placeholder="كلمة مرور جديدة (6 أحرف على الأقل)">
+      <button type="button" class="btn btn-outline btn-block" style="margin-top:8px;" id="cd-reset-pass">تعيين كلمة المرور الجديدة</button>
+      <div id="cd-pass-result" style="display:none;margin-top:10px;background:var(--primary-light);border-radius:10px;padding:10px;">
+        <div style="font-size:12px;color:var(--text-muted);">تم تعيين كلمة المرور الجديدة - شاركها مع الكاشير الآن، لن تظهر مرة أخرى:</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <div id="cd-pass-value" style="font-weight:800;font-size:15px;flex:1;"></div>
+          <button type="button" class="icon-btn" id="cd-copy-pass" title="نسخ كلمة المرور">${COPY_ICON_SVG}</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const emailInput = overlay.querySelector('#cd-email');
+  getCashierEmail(cashier.id).then(email => { emailInput.value = email || 'لا يوجد بريد'; })
+    .catch(err => { emailInput.value = 'تعذّر جلب البريد'; console.error(err); });
+  overlay.querySelector('#cd-copy-email').onclick = () => copyToClipboard(emailInput.value, 'البريد الإلكتروني');
+
+  overlay.querySelector('#cd-save-name').onclick = async () => {
+    const name = overlay.querySelector('#cd-name').value.trim();
+    if (!name) return toastError('أدخل الاسم');
+    const btn = overlay.querySelector('#cd-save-name');
+    setLoading(btn, true, 'جاري الحفظ...');
+    try {
+      await updateCashierName(cashier.id, name);
+      toastSuccess('تم تحديث الاسم');
+      renderSettings(container);
+    } catch (err) {
+      toastError(err.message || 'فشل تحديث الاسم');
+      setLoading(btn, false);
+    }
+  };
+
+  overlay.querySelector('#cd-reset-pass').onclick = async () => {
+    const newPassword = overlay.querySelector('#cd-new-password').value;
+    if (!newPassword || newPassword.length < 6) return toastError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    const ok = await confirmDialog({
+      title: 'تعيين كلمة مرور جديدة',
+      message: 'كلمة مرور الكاشير الحالية ستصبح غير صالحة فورًا، ولن يمكن التراجع عن هذا الإجراء. هل تريد الاستمرار؟',
+      confirmLabel: 'تعيين كلمة المرور'
+    });
+    if (!ok) return;
+    const btn = overlay.querySelector('#cd-reset-pass');
+    setLoading(btn, true, 'جاري التحديث...');
+    try {
+      await resetCashierPassword(cashier.id, newPassword);
+      overlay.querySelector('#cd-pass-value').textContent = newPassword;
+      overlay.querySelector('#cd-pass-result').style.display = '';
+      overlay.querySelector('#cd-copy-pass').onclick = () => copyToClipboard(newPassword, 'كلمة المرور');
+      toastSuccess('تم تعيين كلمة المرور الجديدة');
+    } catch (err) {
+      toastError(err.message || 'فشل تحديث كلمة المرور');
+    }
+    setLoading(btn, false);
+  };
 }
 
 export function applyTheme(theme) {

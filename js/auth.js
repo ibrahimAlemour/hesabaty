@@ -68,6 +68,37 @@ export async function getSupabaseCashiers() {
   return remoteDb.getShopCashiers();
 }
 
+export async function getCashierEmail(cashierId) {
+  const session = await remoteDb.getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/shop/get-cashier-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ cashierId })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل جلب البريد الإلكتروني');
+  return data.email;
+}
+
+export async function resetCashierPassword(cashierId, newPassword) {
+  const session = await remoteDb.getSession();
+  if (!session) throw new Error('انتهت جلستك، سجّل الدخول من جديد');
+  const res = await fetch('/api/shop/reset-cashier-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ cashierId, newPassword })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'فشل تحديث كلمة المرور');
+  return data;
+}
+
+// تعديل اسم الكاشير فقط - مباشرة عبر عميل سوبابيس العادي (سياسة RLS تسمح لصاحب المحل بتعديل حسابات محله فقط)
+export async function updateCashierName(cashierId, name) {
+  return remoteDb.updateCashierProfile(cashierId, { name });
+}
+
 export async function localSignIn(identifier, password) {
   const settings = await getSettings();
   const passwordHash = await hashPassword(password);

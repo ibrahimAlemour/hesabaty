@@ -73,9 +73,10 @@ export async function renderSettings(container) {
       <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">حساب كاشير يسجّل دخوله بالبريد وكلمة المرور من أي جهاز، لكن بدون رؤية الأرباح أو صلاحية الحذف.</p>
       <ul>
         ${supabaseCashiers.length ? supabaseCashiers.map(c => `
-          <li class="list-item" style="cursor:pointer;" data-open-cashier="${c.id}">
+          <li class="list-item">
             <div class="avatar">👤</div>
             <div class="info"><div class="title">${escapeHtml(c.name)}</div><div class="subtitle">كاشير</div></div>
+            <button class="remove-btn" data-edit-cashier="${c.id}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
             <button class="remove-btn" data-remove-cashier="${c.id}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
           </li>`).join('') : `<li class="list-item"><div class="info"><div class="subtitle">لا يوجد حسابات كاشير بعد</div></div></li>`}
       </ul>
@@ -177,13 +178,12 @@ function bind(container, settings) {
     renderSettings(container);
   });
 
-  container.querySelectorAll('[data-open-cashier]').forEach(row => row.onclick = () => {
-    const cashier = supabaseCashiers.find(c => c.id === row.dataset.openCashier);
+  container.querySelectorAll('[data-edit-cashier]').forEach(btn => btn.onclick = () => {
+    const cashier = supabaseCashiers.find(c => c.id === btn.dataset.editCashier);
     if (cashier) openCashierDetailSheet(container, cashier);
   });
 
-  container.querySelectorAll('[data-remove-cashier]').forEach(btn => btn.onclick = async (ev) => {
-    ev.stopPropagation();
+  container.querySelectorAll('[data-remove-cashier]').forEach(btn => btn.onclick = async () => {
     const ok = await confirmDialog({
       title: 'حذف حساب الكاشير',
       message: 'سيتعذّر على هذا الحساب تسجيل الدخول نهائيًا بعد الحذف. هل تريد الاستمرار؟',

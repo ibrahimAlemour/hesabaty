@@ -12,7 +12,23 @@ export async function renderCustomerList(container) {
 
 function renderList(container, customers, query) {
   const filtered = query ? customers.filter(c => fuzzyMatch(c.name, query) || (c.phone && c.phone.includes(query))) : customers;
+  const monthlyCount = customers.filter(c => c.payment_cycle === 'monthly').length;
+  const weeklyCount = customers.filter(c => c.payment_cycle === 'weekly').length;
   container.innerHTML = `
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <div class="stat-card" style="flex:1;align-items:center;text-align:center;">
+        <div class="stat-label">👥 الكل</div>
+        <div class="stat-value">${customers.length}</div>
+      </div>
+      <div class="stat-card" style="flex:1;align-items:center;text-align:center;">
+        <div class="stat-label">🗓️ شهري</div>
+        <div class="stat-value">${monthlyCount}</div>
+      </div>
+      <div class="stat-card" style="flex:1;align-items:center;text-align:center;">
+        <div class="stat-label">🗓️ أسبوعي</div>
+        <div class="stat-value">${weeklyCount}</div>
+      </div>
+    </div>
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="customer-search" placeholder="ابحث بالاسم أو الهاتف..." value="${escapeHtml(query)}">

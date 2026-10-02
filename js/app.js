@@ -8,7 +8,7 @@ import { renderSetupWizard } from './setup.js';
 import { renderLogin } from './login.js';
 import { renderDashboard } from './dashboard.js';
 import { renderNewSale, renderEditSale } from './sales.js';
-import { renderCustomerList, renderCustomerDetail } from './customers.js';
+import { renderCustomerList, renderCustomerDetail, renderCustomerStatement } from './customers.js';
 import { renderProductList } from './products.js';
 import { renderInventory } from './inventory.js';
 import { renderCategories } from './categories.js';
@@ -57,7 +57,7 @@ const CASHIER_MORE_ITEMS = [
   { path: '#/suppliers', label: 'التجار', icon: '🚚' }
 ];
 // أي مسار آخر يحاول الكاشير فتحه (عبر رابط قديم أو تعديل يدوي للرابط) يُعاد توجيهه للرئيسية فورًا
-const CASHIER_ALLOWED_HASH = /^#\/(dashboard|more|customers(\/[\w-]+)?|suppliers(\/[\w-]+)?(\/statement)?|purchase\/[\w-]+)$/;
+const CASHIER_ALLOWED_HASH = /^#\/(dashboard|more|customers(\/[\w-]+)?(\/statement)?|suppliers(\/[\w-]+)?(\/statement)?|purchase\/[\w-]+)$/;
 
 const MORE_ITEMS = [
   { path: '#/products', label: 'المنتجات', icon: '📦' },
@@ -79,6 +79,7 @@ const ROUTES = [
   { pattern: /^#\/sale\/edit\/([\w-]+)$/, title: 'تعديل الفاتورة', showBack: true, render: (m) => renderEditSale(appContent, m[1]) },
   { pattern: /^#\/customers$/, title: 'الزبائن', render: (m, isCashier) => isCashier ? renderCashierCustomerList(appContent) : renderCustomerList(appContent) },
   { pattern: /^#\/customers\/([\w-]+)$/, title: 'حساب الزبون', showBack: true, render: (m, isCashier) => isCashier ? renderCashierCustomerDetail(appContent, m[1]) : renderCustomerDetail(appContent, m[1]) },
+  { pattern: /^#\/customers\/([\w-]+)\/statement$/, title: 'كشف حساب الزبون', showBack: true, render: (m) => renderCustomerStatement(appContent, m[1]) },
   { pattern: /^#\/products$/, title: 'المنتجات', showBack: true, render: () => renderProductList(appContent) },
   { pattern: /^#\/inventory$/, title: 'المخزون', showBack: true, render: () => renderInventory(appContent) },
   { pattern: /^#\/categories$/, title: 'التصنيفات', showBack: true, render: () => renderCategories(appContent) },

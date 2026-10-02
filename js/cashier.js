@@ -123,12 +123,14 @@ export async function renderCashierCustomerDetail(container, customerId) {
         <div class="label">${balance > 0 ? 'الرصيد المستحق على الزبون' : balance < 0 ? 'له رصيد (دفع مسبقًا أكثر من المطلوب)' : 'لا يوجد رصيد مستحق'}</div>
         ${dueDate ? `<div class="label" style="${overdue ? 'color:var(--danger);font-weight:700;' : ''}margin-top:4px;">${overdue ? '⚠️ تجاوز موعد السداد المتوقع' : 'موعد السداد المتوقع'}: ${formatDate(dueDate)}</div>` : ''}
       </div>
+      <button class="btn btn-outline btn-block" id="cashier-customer-statement-btn">📄 كشف حساب</button>
     </div>
     <div class="card" style="padding:10px;">
       <div style="font-weight:800;font-size:14px;margin-bottom:6px;">سجل الحركات</div>
       ${ledger.length ? ledger.slice(0, LIST_LIMIT).map(cashierLedgerRow).join('') : emptyState('📋', 'لا توجد حركات بعد')}
     </div>
   `;
+  container.querySelector('#cashier-customer-statement-btn').onclick = () => { window.location.hash = `#/customers/${customer.id}/statement`; };
 }
 
 function cashierLedgerRow(entry) {

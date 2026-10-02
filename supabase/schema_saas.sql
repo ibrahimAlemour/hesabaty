@@ -627,6 +627,107 @@ create policy profiles_isolated_update on profiles for update using (
 -- الإنشاء والحذف يتمّان فقط عبر Worker بمفتاح service_role (نفس نمط إنشاء/حذف المحل) لأن إنشاء حساب Supabase Auth
 -- وحذفه يتطلبان هذا المفتاح، ولا يمكن فعلهما مباشرة من متصفح صاحب المحل بمفتاح anon العادي.
 
+-- ---------- 23) إصلاح أمني حرج: تقييد كل عمليات الكتابة (INSERT/UPDATE/DELETE) بصاحب المحل فقط ----------
+-- المشكلة: حساب الكاشير كان يُمنع من كل الإجراءات المالية/الإدارية فقط من واجهة التطبيق (إخفاء الأزرار)،
+-- بينما سياسات RLS بقاعدة البيانات كانت تسمح بأي تعديل/إضافة/حذف لأي عضو بنفس المحل (owner أو cashier على السواء)
+-- طالما shop_id مطابق. هذا يعني أن كاشير يملك جلسة Supabase صالحة كان يستطيع تجاوز الواجهة كليًا واستدعاء
+-- REST API مباشرة (مثل fetch من console المتصفح) لإضافة/تعديل/حذف أي بيع أو منتج أو زبون أو فاتورة شراء...
+-- بدون أي قيد فعلي. نضيف الآن is_owner() لكل سياسة كتابة كانت تفتقدها، لتصبح الكتابة محصورة بصاحب المحل فقط
+-- (والمدير العام)، بينما تبقى سياسات القراءة (SELECT) كما هي لأن الكاشير مسموح له بعرض الزبائن/الموردين/الفواتير.
+
+drop policy if exists customers_isolated_insert on customers;
+drop policy if exists customers_isolated_update on customers;
+create policy customers_isolated_insert on customers for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy customers_isolated_update on customers for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists products_isolated_insert on products;
+drop policy if exists products_isolated_update on products;
+create policy products_isolated_insert on products for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy products_isolated_update on products for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists sales_isolated_insert on sales;
+create policy sales_isolated_insert on sales for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists sale_items_isolated_insert on sale_items;
+create policy sale_items_isolated_insert on sale_items for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists payments_isolated_insert on payments;
+create policy payments_isolated_insert on payments for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists cash_tx_isolated_insert on cash_transactions;
+drop policy if exists cash_tx_isolated_update on cash_transactions;
+drop policy if exists cash_tx_isolated_delete on cash_transactions;
+create policy cash_tx_isolated_insert on cash_transactions for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy cash_tx_isolated_update on cash_transactions for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy cash_tx_isolated_delete on cash_transactions for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists audit_isolated_insert on audit_log;
+drop policy if exists audit_isolated_update on audit_log;
+drop policy if exists audit_isolated_delete on audit_log;
+create policy audit_isolated_insert on audit_log for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy audit_isolated_update on audit_log for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy audit_isolated_delete on audit_log for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists settings_isolated_insert on app_settings;
+drop policy if exists settings_isolated_update on app_settings;
+create policy settings_isolated_insert on app_settings for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy settings_isolated_update on app_settings for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists categories_isolated_insert on categories;
+create policy categories_isolated_insert on categories for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists suppliers_isolated_insert on suppliers;
+drop policy if exists suppliers_isolated_update on suppliers;
+create policy suppliers_isolated_insert on suppliers for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy suppliers_isolated_update on suppliers for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists purchases_isolated_insert on purchases;
+drop policy if exists purchases_isolated_update on purchases;
+create policy purchases_isolated_insert on purchases for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy purchases_isolated_update on purchases for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists purchase_items_isolated_insert on purchase_items;
+drop policy if exists purchase_items_isolated_update on purchase_items;
+drop policy if exists purchase_items_isolated_delete on purchase_items;
+create policy purchase_items_isolated_insert on purchase_items for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy purchase_items_isolated_update on purchase_items for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy purchase_items_isolated_delete on purchase_items for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists supplier_payments_isolated_insert on supplier_payments;
+drop policy if exists supplier_payments_isolated_update on supplier_payments;
+drop policy if exists supplier_payments_isolated_delete on supplier_payments;
+create policy supplier_payments_isolated_insert on supplier_payments for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy supplier_payments_isolated_update on supplier_payments for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy supplier_payments_isolated_delete on supplier_payments for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists attachments_isolated_insert on attachments;
+drop policy if exists attachments_isolated_update on attachments;
+drop policy if exists attachments_isolated_delete on attachments;
+create policy attachments_isolated_insert on attachments for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy attachments_isolated_update on attachments for update using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+create policy attachments_isolated_delete on attachments for delete using ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists sms_templates_isolated_insert on sms_templates;
+create policy sms_templates_isolated_insert on sms_templates for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+drop policy if exists sms_schedules_isolated_insert on sms_schedules;
+create policy sms_schedules_isolated_insert on sms_schedules for insert with check ((shop_id = my_shop_id() and is_owner()) or is_super_admin());
+
+-- نفس الثغرة بالضبط موجودة بسياسات تخزين المرفقات (storage.objects): كانت تسمح بأي رفع/تعديل/حذف ملفات
+-- لأي عضو بنفس المحل (bypass مباشر لجدول attachments نفسه، برفع الملف للـ Storage دون المرور بالجدول أصلًا)
+drop policy if exists attachments_storage_insert on storage.objects;
+drop policy if exists attachments_storage_update on storage.objects;
+drop policy if exists attachments_storage_delete on storage.objects;
+create policy attachments_storage_insert on storage.objects for insert with check (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text and (is_owner() or is_super_admin())
+);
+create policy attachments_storage_update on storage.objects for update using (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text and (is_owner() or is_super_admin())
+);
+create policy attachments_storage_delete on storage.objects for delete using (
+  bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text and (is_owner() or is_super_admin())
+);
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

@@ -78,7 +78,11 @@ function tabsHtml() {
 }
 
 function bindEvents(container, debtors, total, activeList) {
-  container.querySelector('#debt-search').oninput = debounce((e) => renderList(container, debtors, total, e.target.value), 150);
+  const searchInput = container.querySelector('#debt-search');
+  searchInput.oninput = debounce((e) => renderList(container, debtors, total, e.target.value), 150);
+  const query = searchInput.value;
+  searchInput.focus();
+  searchInput.setSelectionRange(query.length, query.length);
   container.querySelectorAll('[data-cycle]').forEach(btn => btn.onclick = () => { currentCycle = btn.dataset.cycle; renderList(container, debtors, total, container.querySelector('#debt-search').value); });
   container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
   container.querySelectorAll('[data-pay]').forEach(el => el.onclick = (ev) => {

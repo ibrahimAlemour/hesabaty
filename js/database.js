@@ -469,11 +469,14 @@ export async function getCustomerLedger(customerId) {
   const entries = [
     ...sales.map(s => ({
       type: 'sale', id: s.id, date: s.created_at, amount: s.paid_debt,
-      label: `فاتورة ${s.invoice_number}`, direction: 'debt'
+      label: `فاتورة ${s.invoice_number}`, description: 'فاتورة بيع (دين)', reference: s.invoice_number,
+      direction: 'debt'
     })),
     ...payments.map(p => ({
       type: 'payment', id: p.id, date: p.created_at, amount: p.amount,
-      label: p.method === 'cash' ? 'دفعة نقدية' : 'دفعة تحويل', direction: 'payment', notes: p.notes
+      label: p.method === 'cash' ? 'دفعة نقدية' : 'دفعة تحويل',
+      description: p.method === 'cash' ? 'دفعة نقدية' : 'دفعة تحويل', reference: null,
+      direction: 'payment', notes: p.notes
     }))
   ];
   return entries.sort((a, b) => b.date.localeCompare(a.date));
@@ -550,6 +553,7 @@ export async function createSale(payload) {
     const paidCash = toCents(payload.paidCash || 0);
     const paidTransfer = toCents(payload.paidTransfer || 0);
     const paidDebt = toCents(payload.paidDebt || 0);
+    if (paidCash < 0 || paidTransfer < 0 || paidDebt < 0) throw new Error('لا يمكن إدخال مبلغ سالب');
     const paymentSum = paidCash + paidTransfer + paidDebt;
 
     if (Math.abs(paymentSum - subtotal) > 1) {
@@ -629,6 +633,7 @@ export async function updateSale(id, payload) {
   const paidCash = toCents(payload.paidCash || 0);
   const paidTransfer = toCents(payload.paidTransfer || 0);
   const paidDebt = toCents(payload.paidDebt || 0);
+  if (paidCash < 0 || paidTransfer < 0 || paidDebt < 0) throw new Error('لا يمكن إدخال مبلغ سالب');
   if (Math.abs(paidCash + paidTransfer + paidDebt - subtotal) > 1) {
     throw new Error('مجموع طرق الدفع لا يساوي إجمالي الفاتورة');
   }
@@ -890,6 +895,7 @@ export async function addPurchase(payload) {
     const paidCash = toCents(payload.paidCash || 0);
     const paidTransfer = toCents(payload.paidTransfer || 0);
     const paidCredit = toCents(payload.paidCredit || 0);
+    if (paidCash < 0 || paidTransfer < 0 || paidCredit < 0) throw new Error('لا يمكن إدخال مبلغ سالب');
     const paymentSum = paidCash + paidTransfer + paidCredit;
 
     if (Math.abs(paymentSum - totalAmount) > 1) {
@@ -981,6 +987,7 @@ export async function updatePurchase(id, payload) {
   const paidCash = toCents(payload.paidCash || 0);
   const paidTransfer = toCents(payload.paidTransfer || 0);
   const paidCredit = toCents(payload.paidCredit || 0);
+  if (paidCash < 0 || paidTransfer < 0 || paidCredit < 0) throw new Error('لا يمكن إدخال مبلغ سالب');
   if (Math.abs(paidCash + paidTransfer + paidCredit - totalAmount) > 1) {
     throw new Error('مجموع طرق الدفع لا يساوي إجمالي الفاتورة');
   }

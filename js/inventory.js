@@ -38,7 +38,10 @@ function renderList(container, items) {
     </div>
   `;
 
-  container.querySelector('#inv-search').oninput = debounce((e) => { currentQuery = e.target.value; renderList(container, items); }, 150);
+  const searchInput = container.querySelector('#inv-search');
+  searchInput.oninput = debounce((e) => { currentQuery = e.target.value; renderList(container, items); }, 150);
+  searchInput.focus();
+  searchInput.setSelectionRange(currentQuery.length, currentQuery.length);
   container.querySelectorAll('[data-cat]').forEach(btn => btn.onclick = () => { currentCategory = btn.dataset.cat; renderList(container, items); });
 }
 

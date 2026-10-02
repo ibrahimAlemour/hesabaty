@@ -39,7 +39,10 @@ function renderList(container, products) {
     </div>
   `;
 
-  container.querySelector('#product-search').oninput = debounce((e) => { currentQuery = e.target.value; renderList(container, products); }, 150);
+  const searchInput = container.querySelector('#product-search');
+  searchInput.oninput = debounce((e) => { currentQuery = e.target.value; renderList(container, products); }, 150);
+  searchInput.focus();
+  searchInput.setSelectionRange(currentQuery.length, currentQuery.length);
   container.querySelectorAll('[data-cat]').forEach(btn => btn.onclick = () => { currentCategory = btn.dataset.cat; renderList(container, products); });
   container.querySelector('#add-product-btn').onclick = () => openProductForm(container, null, () => renderProductList(container));
   container.querySelectorAll('[data-edit]').forEach(el => el.onclick = () => {

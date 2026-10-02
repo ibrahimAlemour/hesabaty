@@ -43,7 +43,10 @@ function renderListScreen(container, purchases, query) {
       ${filtered.length ? filtered.map(purchaseRow).join('') : emptyState('🧾', 'لا توجد فواتير شراء', 'أضف أول فاتورة شراء للبدء')}
     </div>
   `;
-  container.querySelector('#purchase-search').oninput = debounce((e) => renderListScreen(container, purchases, e.target.value), 150);
+  const searchInput = container.querySelector('#purchase-search');
+  searchInput.oninput = debounce((e) => renderListScreen(container, purchases, e.target.value), 150);
+  searchInput.focus();
+  searchInput.setSelectionRange(query.length, query.length);
   container.querySelector('#add-purchase-btn').onclick = () => window.location.hash = '#/purchase/new';
   container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/purchase/${el.dataset.open}`);
 }

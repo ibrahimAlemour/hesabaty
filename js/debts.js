@@ -20,33 +20,45 @@ function daysLate(dueDate) {
   return Math.max(1, Math.round(ms / 86400000));
 }
 
+// الهيكل الثابت (مربع البحث + التبويبات) يُبنى مرة واحدة فقط لكل قيمة currentCycle؛ عنصر input لا يُعاد
+// إنشاؤه أبدًا بسبب الكتابة - كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (والبطاقة الإحصائية بفرع "المتأخرون"
+// لأنها تعتمد على نص البحث أيضًا) لمنع فقدان الأحرف أثناء الكتابة السريعة. تغيير التبويب (ضغطة لا كتابة) آمن
+// أن يعيد بناء الهيكل كاملًا لأنه يفرض شكلًا مختلفًا تمامًا (بطاقة متأخرين حمراء مقابل بطاقة إجمالي عادية)
 function renderList(container, debtors, total, query) {
-  let filtered = query ? debtors.filter(c => fuzzyMatch(c.name, query)) : debtors;
-
   if (currentCycle === 'overdue') {
-    const overdueList = filtered
-      .filter(c => c.dueDate && new Date(c.dueDate) < new Date())
-      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-    const overdueTotal = overdueList.reduce((s, c) => s + c.balance, 0);
-
     container.innerHTML = `
-      <div class="card" style="text-align:center;background:var(--danger-light);">
-        <div class="stat-label" style="justify-content:center;color:var(--danger);">🔴 الزبائن المتأخرون</div>
-        <div class="stat-value" style="color:var(--danger);font-size:26px;">${overdueList.length}</div>
-        <div style="font-size:13px;color:var(--danger);margin-top:6px;font-weight:700;">إجمالي المبالغ المتأخرة: ${formatMoney(overdueTotal)}</div>
-      </div>
+      <div id="debt-stat-card"></div>
       <div class="search-box">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
         <input type="text" id="debt-search" placeholder="ابحث عن زبون..." value="${escapeHtml(query)}">
       </div>
       ${tabsHtml()}
-      ${overdueList.length ? overdueList.map(overdueCard).join('') : emptyState('✅', 'لا يوجد زبائن متأخرون حاليًا')}
+      <div id="debt-list-results"></div>
     `;
-    bindEvents(container, debtors, total, overdueList);
+
+    let activeList = [];
+    const renderResults = (q) => {
+      const filtered = q ? debtors.filter(c => fuzzyMatch(c.name, q)) : debtors;
+      const overdueList = filtered
+        .filter(c => c.dueDate && new Date(c.dueDate) < new Date())
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+      const overdueTotal = overdueList.reduce((s, c) => s + c.balance, 0);
+      activeList = overdueList;
+      container.querySelector('#debt-stat-card').innerHTML = `
+        <div class="card" style="text-align:center;background:var(--danger-light);">
+          <div class="stat-label" style="justify-content:center;color:var(--danger);">🔴 الزبائن المتأخرون</div>
+          <div class="stat-value" style="color:var(--danger);font-size:26px;">${overdueList.length}</div>
+          <div style="font-size:13px;color:var(--danger);margin-top:6px;font-weight:700;">إجمالي المبالغ المتأخرة: ${formatMoney(overdueTotal)}</div>
+        </div>`;
+      container.querySelector('#debt-list-results').innerHTML = overdueList.length ? overdueList.map(overdueCard).join('') : emptyState('✅', 'لا يوجد زبائن متأخرون حاليًا');
+      bindRowEvents(container, () => activeList);
+    };
+    renderResults(query);
+
+    container.querySelector('#debt-search').oninput = debounce((e) => renderResults(e.target.value), 150);
+    bindTabEvents(container, debtors, total);
     return;
   }
-
-  if (currentCycle !== 'all') filtered = filtered.filter(c => (c.payment_cycle || 'none') === currentCycle);
 
   container.innerHTML = `
     <div class="card" style="text-align:center;">
@@ -59,11 +71,37 @@ function renderList(container, debtors, total, query) {
       <input type="text" id="debt-search" placeholder="ابحث عن زبون..." value="${escapeHtml(query)}">
     </div>
     ${tabsHtml()}
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(debtorRow).join('') : emptyState('✅', 'لا توجد ديون مستحقة')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="debt-list-results"></div>
   `;
-  bindEvents(container, debtors, total, filtered);
+
+  let activeList = [];
+  const renderResults = (q) => {
+    let filtered = q ? debtors.filter(c => fuzzyMatch(c.name, q)) : debtors;
+    if (currentCycle !== 'all') filtered = filtered.filter(c => (c.payment_cycle || 'none') === currentCycle);
+    activeList = filtered;
+    container.querySelector('#debt-list-results').innerHTML = filtered.length ? filtered.map(debtorRow).join('') : emptyState('✅', 'لا توجد ديون مستحقة');
+    bindRowEvents(container, () => activeList);
+  };
+  renderResults(query);
+
+  container.querySelector('#debt-search').oninput = debounce((e) => renderResults(e.target.value), 150);
+  bindTabEvents(container, debtors, total);
+}
+
+function bindRowEvents(container, getActiveList) {
+  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
+  container.querySelectorAll('[data-pay]').forEach(el => el.onclick = (ev) => {
+    ev.stopPropagation();
+    const c = getActiveList().find(x => x.id === el.dataset.pay);
+    openRecordPaymentSheet(c, c.balance, () => renderDebts(container));
+  });
+}
+
+function bindTabEvents(container, debtors, total) {
+  container.querySelectorAll('[data-cycle]').forEach(btn => btn.onclick = () => {
+    currentCycle = btn.dataset.cycle;
+    renderList(container, debtors, total, container.querySelector('#debt-search').value);
+  });
 }
 
 function tabsHtml() {
@@ -75,21 +113,6 @@ function tabsHtml() {
       <button class="tab-btn ${currentCycle === 'monthly' ? 'active' : ''}" data-cycle="monthly">🗓️ شهري</button>
       <button class="tab-btn ${currentCycle === 'none' ? 'active' : ''}" data-cycle="none">بدون تحديد</button>
     </div>`;
-}
-
-function bindEvents(container, debtors, total, activeList) {
-  const searchInput = container.querySelector('#debt-search');
-  searchInput.oninput = debounce((e) => renderList(container, debtors, total, e.target.value), 150);
-  const query = searchInput.value;
-  searchInput.focus();
-  searchInput.setSelectionRange(query.length, query.length);
-  container.querySelectorAll('[data-cycle]').forEach(btn => btn.onclick = () => { currentCycle = btn.dataset.cycle; renderList(container, debtors, total, container.querySelector('#debt-search').value); });
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
-  container.querySelectorAll('[data-pay]').forEach(el => el.onclick = (ev) => {
-    ev.stopPropagation();
-    const c = activeList.find(x => x.id === el.dataset.pay);
-    openRecordPaymentSheet(c, c.balance, () => renderDebts(container));
-  });
 }
 
 function debtorRow(c) {

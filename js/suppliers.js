@@ -11,23 +11,28 @@ export async function renderSupplierList(container) {
   renderList(container, suppliers, '');
 }
 
+// الهيكل الثابت (مربع البحث + زر الإضافة) يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه أبدًا بعدها -
+// كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (#supplier-list-results) لمنع فقدان الأحرف أثناء الكتابة السريعة
 function renderList(container, suppliers, query) {
-  const filtered = query ? suppliers.filter(s => fuzzyMatch(s.name, query) || (s.phone && s.phone.includes(query))) : suppliers;
   container.innerHTML = `
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="supplier-search" placeholder="ابحث بالاسم أو الهاتف..." value="${escapeHtml(query)}">
     </div>
     <button class="btn btn-primary btn-block" id="add-supplier-btn" style="margin-bottom:14px;">+ إضافة مورد</button>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(supplierRow).join('') : emptyState('🚚', 'لا يوجد موردون', 'أضف أول مورد للبدء')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="supplier-list-results"></div>
   `;
-  container.querySelector('#supplier-search').oninput = debounce((e) => renderList(container, suppliers, e.target.value), 150);
-  container.querySelector('#supplier-search').focus();
-  container.querySelector('#supplier-search').setSelectionRange(query.length, query.length);
+
+  const renderResults = (q) => {
+    const filtered = q ? suppliers.filter(s => fuzzyMatch(s.name, q) || (s.phone && s.phone.includes(q))) : suppliers;
+    const resultsEl = container.querySelector('#supplier-list-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(supplierRow).join('') : emptyState('🚚', 'لا يوجد موردون', 'أضف أول مورد للبدء');
+    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/suppliers/${el.dataset.open}`);
+  };
+  renderResults(query);
+
+  container.querySelector('#supplier-search').oninput = debounce((e) => renderResults(e.target.value), 150);
   container.querySelector('#add-supplier-btn').onclick = () => openAddSupplierSheet(container);
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/suppliers/${el.dataset.open}`);
 }
 
 function supplierRow(s) {

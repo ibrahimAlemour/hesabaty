@@ -29,26 +29,30 @@ export async function renderPurchaseList(container) {
   renderListScreen(container, purchases, '');
 }
 
+// الهيكل الثابت (مربع البحث + زر الإضافة) يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه أبدًا بعدها -
+// كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (#purchase-list-results) لمنع فقدان الأحرف أثناء الكتابة السريعة
 function renderListScreen(container, purchases, query) {
-  const filtered = query
-    ? purchases.filter(p => fuzzyMatch(p.supplier_name_snapshot, query) || (p.purchase_number || '').includes(query) || (p.supplier_invoice_number || '').includes(query))
-    : purchases;
   container.innerHTML = `
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="purchase-search" placeholder="ابحث باسم المورد أو رقم الفاتورة..." value="${escapeHtml(query)}">
     </div>
     <button class="btn btn-primary btn-block" id="add-purchase-btn" style="margin-bottom:14px;">+ إضافة فاتورة شراء</button>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(purchaseRow).join('') : emptyState('🧾', 'لا توجد فواتير شراء', 'أضف أول فاتورة شراء للبدء')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="purchase-list-results"></div>
   `;
-  const searchInput = container.querySelector('#purchase-search');
-  searchInput.oninput = debounce((e) => renderListScreen(container, purchases, e.target.value), 150);
-  searchInput.focus();
-  searchInput.setSelectionRange(query.length, query.length);
+
+  const renderResults = (q) => {
+    const filtered = q
+      ? purchases.filter(p => fuzzyMatch(p.supplier_name_snapshot, q) || (p.purchase_number || '').includes(q) || (p.supplier_invoice_number || '').includes(q))
+      : purchases;
+    const resultsEl = container.querySelector('#purchase-list-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(purchaseRow).join('') : emptyState('🧾', 'لا توجد فواتير شراء', 'أضف أول فاتورة شراء للبدء');
+    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/purchase/${el.dataset.open}`);
+  };
+  renderResults(query);
+
+  container.querySelector('#purchase-search').oninput = debounce((e) => renderResults(e.target.value), 150);
   container.querySelector('#add-purchase-btn').onclick = () => window.location.hash = '#/purchase/new';
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/purchase/${el.dataset.open}`);
 }
 
 const STATUS_BADGE = {

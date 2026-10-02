@@ -15,11 +15,11 @@ export async function renderProductList(container) {
   renderList(container, products);
 }
 
+// الهيكل الثابت (مربع البحث + التبويبات + زر الإضافة) يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه
+// أبدًا بعد ذلك بسبب الكتابة - كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (#product-list-results) لمنع
+// فقدان الأحرف أثناء الكتابة السريعة. تغيير التصنيف (ضغطة زر لا كتابة) يعيد بناء الهيكل كاملًا وهذا آمن
 function renderList(container, products) {
   const categories = container._categories;
-  let filtered = products;
-  if (currentCategory !== 'all') filtered = filtered.filter(p => p.category_id === currentCategory);
-  if (currentQuery) filtered = filtered.filter(p => fuzzyMatch(p.name, currentQuery));
 
   container.innerHTML = `
     <div class="search-box">
@@ -34,21 +34,25 @@ function renderList(container, products) {
       ${container._canManage ? `<button class="icon-btn" id="manage-categories-btn" title="إدارة التصنيفات" style="flex-shrink:0;border:1.5px solid var(--border);">⚙️</button>` : ''}
     </div>
     <button class="btn btn-primary btn-block" id="add-product-btn" style="margin-bottom:14px;margin-top:10px;">+ إضافة منتج</button>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(p => productRow(p, categories)).join('') : emptyState('📦', 'لا توجد منتجات')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="product-list-results"></div>
   `;
 
-  const searchInput = container.querySelector('#product-search');
-  searchInput.oninput = debounce((e) => { currentQuery = e.target.value; renderList(container, products); }, 150);
-  searchInput.focus();
-  searchInput.setSelectionRange(currentQuery.length, currentQuery.length);
+  const renderResults = (q) => {
+    let filtered = products;
+    if (currentCategory !== 'all') filtered = filtered.filter(p => p.category_id === currentCategory);
+    if (q) filtered = filtered.filter(p => fuzzyMatch(p.name, q));
+    const resultsEl = container.querySelector('#product-list-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(p => productRow(p, categories)).join('') : emptyState('📦', 'لا توجد منتجات');
+    resultsEl.querySelectorAll('[data-edit]').forEach(el => el.onclick = () => {
+      const p = products.find(x => x.id === el.dataset.edit);
+      openProductForm(container, p, () => renderProductList(container));
+    });
+  };
+  renderResults(currentQuery);
+
+  container.querySelector('#product-search').oninput = debounce((e) => { currentQuery = e.target.value; renderResults(currentQuery); }, 150);
   container.querySelectorAll('[data-cat]').forEach(btn => btn.onclick = () => { currentCategory = btn.dataset.cat; renderList(container, products); });
   container.querySelector('#add-product-btn').onclick = () => openProductForm(container, null, () => renderProductList(container));
-  container.querySelectorAll('[data-edit]').forEach(el => el.onclick = () => {
-    const p = products.find(x => x.id === el.dataset.edit);
-    openProductForm(container, p, () => renderProductList(container));
-  });
   const manageCatBtn = container.querySelector('#manage-categories-btn');
   if (manageCatBtn) manageCatBtn.onclick = () => window.location.hash = '#/categories';
 }

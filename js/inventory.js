@@ -13,12 +13,10 @@ export async function renderInventory(container) {
   renderList(container, items);
 }
 
+// الهيكل الثابت يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه أبدًا بسبب الكتابة - كل ضغطة تُحدّث فقط
+// منطقة النتائج الفرعية (#inv-list-results) لمنع فقدان الأحرف أثناء الكتابة السريعة
 function renderList(container, items) {
   const categories = container._categories;
-  let filtered = items;
-  if (currentCategory !== 'all') filtered = filtered.filter(i => i.category_id === currentCategory);
-  if (currentQuery) filtered = filtered.filter(i => fuzzyMatch(i.name, currentQuery));
-
   const soldCount = items.filter(i => i.soldToday > 0).length;
 
   container.innerHTML = `
@@ -33,15 +31,18 @@ function renderList(container, items) {
       <button class="tab-btn ${currentCategory === 'all' ? 'active' : ''}" data-cat="all">الكل</button>
       ${categories.map(c => `<button class="tab-btn ${currentCategory === c.id ? 'active' : ''}" data-cat="${c.id}">${c.icon} ${c.name}</button>`).join('')}
     </div>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(i => itemRow(i, categories)).join('') : emptyState('📦', 'لا توجد منتجات مطابقة')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="inv-list-results"></div>
   `;
 
-  const searchInput = container.querySelector('#inv-search');
-  searchInput.oninput = debounce((e) => { currentQuery = e.target.value; renderList(container, items); }, 150);
-  searchInput.focus();
-  searchInput.setSelectionRange(currentQuery.length, currentQuery.length);
+  const renderResults = (q) => {
+    let filtered = items;
+    if (currentCategory !== 'all') filtered = filtered.filter(i => i.category_id === currentCategory);
+    if (q) filtered = filtered.filter(i => fuzzyMatch(i.name, q));
+    container.querySelector('#inv-list-results').innerHTML = filtered.length ? filtered.map(i => itemRow(i, categories)).join('') : emptyState('📦', 'لا توجد منتجات مطابقة');
+  };
+  renderResults(currentQuery);
+
+  container.querySelector('#inv-search').oninput = debounce((e) => { currentQuery = e.target.value; renderResults(currentQuery); }, 150);
   container.querySelectorAll('[data-cat]').forEach(btn => btn.onclick = () => { currentCategory = btn.dataset.cat; renderList(container, items); });
 }
 

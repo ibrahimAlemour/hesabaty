@@ -10,8 +10,11 @@ export async function renderCustomerList(container) {
   renderList(container, customers, '');
 }
 
+// نبني الهيكل الثابت (بطاقات الإحصاء + مربع البحث + زر الإضافة) مرة واحدة فقط عند دخول الشاشة، وعنصر
+// input نفسه لا يُعاد إنشاؤه أبدًا بعدها؛ كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (#customer-list-results)
+// حتى لا يفقد المتصفح أي حرف أو يفقد التركيز أثناء الكتابة السريعة (كان الهيكل القديم يعيد بناء الحاوية
+// كاملة بما فيها input نفسه بكل ضغطة، فيدمّره ويعيد إنشاءه من جديد كل مرة)
 function renderList(container, customers, query) {
-  const filtered = query ? customers.filter(c => fuzzyMatch(c.name, query) || (c.phone && c.phone.includes(query))) : customers;
   const monthlyCount = customers.filter(c => c.payment_cycle === 'monthly').length;
   const weeklyCount = customers.filter(c => c.payment_cycle === 'weekly').length;
   container.innerHTML = `
@@ -34,15 +37,19 @@ function renderList(container, customers, query) {
       <input type="text" id="customer-search" placeholder="ابحث بالاسم أو الهاتف..." value="${escapeHtml(query)}">
     </div>
     <button class="btn btn-primary btn-block" id="add-customer-btn" style="margin-bottom:14px;">+ إضافة زبون</button>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(customerRow).join('') : emptyState('👥', 'لا يوجد زبائن', 'أضف أول زبون للبدء')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="customer-list-results"></div>
   `;
-  container.querySelector('#customer-search').oninput = debounce((e) => renderList(container, customers, e.target.value), 150);
-  container.querySelector('#customer-search').focus();
-  container.querySelector('#customer-search').setSelectionRange(query.length, query.length);
+
+  const renderResults = (q) => {
+    const filtered = q ? customers.filter(c => fuzzyMatch(c.name, q) || (c.phone && c.phone.includes(q))) : customers;
+    const resultsEl = container.querySelector('#customer-list-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(customerRow).join('') : emptyState('👥', 'لا يوجد زبائن', 'أضف أول زبون للبدء');
+    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
+  };
+  renderResults(query);
+
+  container.querySelector('#customer-search').oninput = debounce((e) => renderResults(e.target.value), 150);
   container.querySelector('#add-customer-btn').onclick = () => openAddCustomerSheet(container);
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
 }
 
 function cycleBadge(customer) {

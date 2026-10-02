@@ -17,22 +17,28 @@ export async function renderShopsList(container) {
   render(container, enriched, cachedQuery);
 }
 
+// الهيكل الثابت (مربع البحث + زر الإضافة) يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه أبدًا بعدها -
+// كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (#shop-list-results) لمنع فقدان الأحرف أثناء الكتابة السريعة
 function render(container, shops, query) {
-  const filtered = query ? shops.filter(s => fuzzyMatch(s.name, query) || (s.phone && s.phone.includes(query)) || fuzzyMatch(s.owner_name || '', query)) : shops;
-
   container.innerHTML = `
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="shop-search" placeholder="ابحث بالاسم أو رقم الهاتف..." value="${escapeHtml(query)}">
     </div>
     <button class="btn btn-primary btn-block" id="add-shop-btn" style="margin-bottom:14px;">+ إضافة محل جديد</button>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(shopRow).join('') : emptyState('🏪', 'لا توجد محلات مطابقة')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="shop-list-results"></div>
   `;
-  container.querySelector('#shop-search').oninput = debounce((e) => { cachedQuery = e.target.value; render(container, shops, cachedQuery); }, 150);
+
+  const renderResults = (q) => {
+    const filtered = q ? shops.filter(s => fuzzyMatch(s.name, q) || (s.phone && s.phone.includes(q)) || fuzzyMatch(s.owner_name || '', q)) : shops;
+    const resultsEl = container.querySelector('#shop-list-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(shopRow).join('') : emptyState('🏪', 'لا توجد محلات مطابقة');
+    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/shops/${el.dataset.open}`);
+  };
+  renderResults(query);
+
+  container.querySelector('#shop-search').oninput = debounce((e) => { cachedQuery = e.target.value; renderResults(cachedQuery); }, 150);
   container.querySelector('#add-shop-btn').onclick = () => openCreateShopSheet(container);
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/shops/${el.dataset.open}`);
 }
 
 function shopRow(s) {

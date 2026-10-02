@@ -47,8 +47,9 @@ export async function renderCashierCustomerList(container) {
   renderCustomerListView(container, customers, '');
 }
 
+// الهيكل الثابت (بطاقات الإحصاء + مربع البحث) يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه أبدًا بعدها -
+// كل ضغطة تُحدّث فقط منطقة النتائج الفرعية (#cashier-customer-results) لمنع فقدان الأحرف أثناء الكتابة السريعة
 function renderCustomerListView(container, customers, query) {
-  const filtered = query ? customers.filter(c => fuzzyMatch(c.name, query) || (c.phone && c.phone.includes(query))) : customers;
   const monthlyCount = customers.filter(c => c.payment_cycle === 'monthly').length;
   const weeklyCount = customers.filter(c => c.payment_cycle === 'weekly').length;
   container.innerHTML = `
@@ -70,14 +71,18 @@ function renderCustomerListView(container, customers, query) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="cashier-customer-search" placeholder="ابحث بالاسم أو الهاتف..." value="${escapeHtml(query)}">
     </div>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(cashierCustomerRow).join('') : emptyState('👥', 'لا يوجد زبائن')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="cashier-customer-results"></div>
   `;
-  container.querySelector('#cashier-customer-search').oninput = debounce((e) => renderCustomerListView(container, customers, e.target.value), 150);
-  container.querySelector('#cashier-customer-search').focus();
-  container.querySelector('#cashier-customer-search').setSelectionRange(query.length, query.length);
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/customers/${el.dataset.open}`; });
+
+  const renderResults = (q) => {
+    const filtered = q ? customers.filter(c => fuzzyMatch(c.name, q) || (c.phone && c.phone.includes(q))) : customers;
+    const resultsEl = container.querySelector('#cashier-customer-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(cashierCustomerRow).join('') : emptyState('👥', 'لا يوجد زبائن');
+    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/customers/${el.dataset.open}`; });
+  };
+  renderResults(query);
+
+  container.querySelector('#cashier-customer-search').oninput = debounce((e) => renderResults(e.target.value), 150);
 }
 
 function cashierCycleBadge(customer) {
@@ -154,21 +159,26 @@ export async function renderCashierSupplierList(container) {
   renderSupplierListView(container, suppliers, '');
 }
 
+// الهيكل الثابت (مربع البحث) يُبنى مرة واحدة فقط؛ عنصر input لا يُعاد إنشاؤه أبدًا بعدها - كل ضغطة تُحدّث
+// فقط منطقة النتائج الفرعية (#cashier-supplier-results) لمنع فقدان الأحرف أثناء الكتابة السريعة
 function renderSupplierListView(container, suppliers, query) {
-  const filtered = query ? suppliers.filter(s => fuzzyMatch(s.name, query) || (s.phone && s.phone.includes(query))) : suppliers;
   container.innerHTML = `
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="cashier-supplier-search" placeholder="ابحث بالاسم أو الهاتف..." value="${escapeHtml(query)}">
     </div>
-    <div class="card" style="padding:6px 10px;">
-      ${filtered.length ? filtered.map(cashierSupplierRow).join('') : emptyState('🚚', 'لا يوجد تجار')}
-    </div>
+    <div class="card" style="padding:6px 10px;" id="cashier-supplier-results"></div>
   `;
-  container.querySelector('#cashier-supplier-search').oninput = debounce((e) => renderSupplierListView(container, suppliers, e.target.value), 150);
-  container.querySelector('#cashier-supplier-search').focus();
-  container.querySelector('#cashier-supplier-search').setSelectionRange(query.length, query.length);
-  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/suppliers/${el.dataset.open}`; });
+
+  const renderResults = (q) => {
+    const filtered = q ? suppliers.filter(s => fuzzyMatch(s.name, q) || (s.phone && s.phone.includes(q))) : suppliers;
+    const resultsEl = container.querySelector('#cashier-supplier-results');
+    resultsEl.innerHTML = filtered.length ? filtered.map(cashierSupplierRow).join('') : emptyState('🚚', 'لا يوجد تجار');
+    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/suppliers/${el.dataset.open}`; });
+  };
+  renderResults(query);
+
+  container.querySelector('#cashier-supplier-search').oninput = debounce((e) => renderResults(e.target.value), 150);
 }
 
 function cashierSupplierRow(s) {

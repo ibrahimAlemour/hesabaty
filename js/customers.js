@@ -184,6 +184,18 @@ export async function renderCustomerDetail(container, customerId) {
       const entry = ledger.find(e => e.type === type && e.id === id);
       if (entry) openLedgerDetailSheet(entry);
     });
+    root.querySelectorAll('[data-ledger-delete]').forEach(el => el.onclick = async (ev) => {
+      ev.stopPropagation();
+      const ok = await confirmDialog({ title: 'حذف الدفعة', message: 'سيتم حذف هذه الدفعة وستتأثر أرصدة الزبون والصندوق.' });
+      if (!ok) return;
+      try {
+        await db.deletePayment(el.dataset.ledgerDelete);
+        toastSuccess('تم حذف الدفعة');
+        renderCustomerDetail(container, customerId);
+      } catch (err) {
+        toastError(err.message || 'حدث خطأ أثناء الحذف');
+      }
+    });
     root.querySelectorAll('[data-sms-open]').forEach(el => el.onclick = () => {
       const entry = smsLog.find(e => e.id === el.dataset.smsOpen);
       if (entry) openSmsDetailSheet(entry);
@@ -198,7 +210,7 @@ export async function renderCustomerDetail(container, customerId) {
           <div style="font-weight:800;font-size:14px;">آخر الحركات</div>
           ${ledger.length ? `<span class="badge" style="background:var(--bg);color:var(--text-muted);">آخر ${Math.min(TAB_LIMIT, ledger.length)}</span>` : ''}
         </div>
-        ${ledger.length ? items.map(ledgerRow).join('') : emptyState('📋', 'لا توجد حركات بعد')}
+        ${ledger.length ? items.map(e => ledgerRow(e, canManage)).join('') : emptyState('📋', 'لا توجد حركات بعد')}
         ${ledger.length > TAB_LIMIT ? `<button class="btn btn-outline btn-block" style="margin-top:8px;" data-view-all="ledger">عرض جميع الحركات</button>` : ''}
       `;
     }
@@ -220,7 +232,7 @@ export async function renderCustomerDetail(container, customerId) {
     const overlay = openSheet(`
       <div class="sheet-header"><h3>${isLedger ? 'كل الحركات' : 'كل الرسائل'}</h3>${closeBtnHtml()}</div>
       <div class="card" style="padding:6px 10px;max-height:65vh;overflow-y:auto;">
-        ${items.length ? items.map(isLedger ? ledgerRow : smsLogRow).join('') : emptyState(isLedger ? '📋' : '✉️', isLedger ? 'لا توجد حركات بعد' : 'لا توجد رسائل بعد')}
+        ${items.length ? items.map(isLedger ? (e => ledgerRow(e, canManage)) : smsLogRow).join('') : emptyState(isLedger ? '📋' : '✉️', isLedger ? 'لا توجد حركات بعد' : 'لا توجد رسائل بعد')}
       </div>
     `);
     overlay.querySelector('[data-detail-close]').onclick = closeSheet;
@@ -261,8 +273,11 @@ export async function renderCustomerDetail(container, customerId) {
   }
 }
 
-function ledgerRow(entry) {
+// حذف الحركة متاح فقط لحركات الدفعات (نفس نمط suppliers.js) - حذف حركة دين (فاتورة بيع) يبقى فقط
+// من شاشة الفاتورة نفسها لأنه عملية أعقد (تمسح بنود الفاتورة وتؤثر على المخزون المفاهيمي، لا مجرد صف واحد)
+function ledgerRow(entry, canManage) {
   const isDebt = entry.direction === 'debt';
+  const canDeletePayment = canManage && entry.type === 'payment';
   return `
     <div class="list-item" style="cursor:pointer;" data-ledger-open="${entry.type}:${entry.id}">
       <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
@@ -271,6 +286,9 @@ function ledgerRow(entry) {
         <div class="subtitle">${formatDateTime(entry.date)}</div>
       </div>
       <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
+      ${canDeletePayment ? `<button class="remove-btn" data-ledger-delete="${entry.id}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+      </button>` : ''}
     </div>`;
 }
 

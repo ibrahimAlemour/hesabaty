@@ -155,9 +155,11 @@ export async function renderSupplierDetail(container, supplierId) {
       </div>`;
   }
 
+  // حذف حركة دفعة يحذف الدفعة فقط؛ حذف حركة دين (فاتورة شراء) يحذف الفاتورة كاملة بكل بنودها تمامًا
+  // مثل زر "حذف فاتورة الشراء" بشاشة الفاتورة نفسها - كلاهما متاح فقط لصاحب المحل (canManage)
   function ledgerRow(entry) {
     const isDebt = entry.direction === 'debt';
-    const canDeletePayment = canManage && entry.type === 'supplier_payment';
+    const canDeleteEntry = canManage && (entry.type === 'supplier_payment' || entry.type === 'purchase');
     return `
       <div class="list-item">
         <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
@@ -166,7 +168,7 @@ export async function renderSupplierDetail(container, supplierId) {
           <div class="subtitle">${formatDateTime(entry.date)}</div>
         </div>
         <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
-        ${canDeletePayment ? `<button class="remove-btn" data-ledger-delete="${entry.id}">
+        ${canDeleteEntry ? `<button class="remove-btn" data-ledger-delete="${entry.type}:${entry.id}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
         </button>` : ''}
       </div>`;
@@ -175,10 +177,24 @@ export async function renderSupplierDetail(container, supplierId) {
   function bindLedgerClicks(root) {
     root.querySelectorAll('[data-ledger-delete]').forEach(el => el.onclick = async (ev) => {
       ev.stopPropagation();
+      const [type, id] = el.dataset.ledgerDelete.split(':');
+      if (type === 'purchase') {
+        const entry = ledger.find(e => e.type === type && e.id === id);
+        const ok = await confirmDialog({ title: 'حذف فاتورة الشراء', message: `سيتم حذف فاتورة ${entry ? entry.reference || entry.label : ''} كاملة بكل بنودها، وستتأثر أرصدة المورد والصندوق. لا يمكن التراجع عن هذا الإجراء.` });
+        if (!ok) return;
+        try {
+          await db.deletePurchase(id);
+          toastSuccess('تم حذف فاتورة الشراء');
+          renderSupplierDetail(container, supplierId);
+        } catch (err) {
+          toastError(err.message || 'حدث خطأ أثناء الحذف');
+        }
+        return;
+      }
       const ok = await confirmDialog({ title: 'حذف الدفعة', message: 'سيتم حذف هذه الدفعة وستتأثر أرصدة المورد والصندوق.' });
       if (!ok) return;
       try {
-        await db.deleteSupplierPayment(el.dataset.ledgerDelete);
+        await db.deleteSupplierPayment(id);
         toastSuccess('تم حذف الدفعة');
         renderSupplierDetail(container, supplierId);
       } catch (err) {

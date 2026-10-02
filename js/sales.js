@@ -1,7 +1,7 @@
 // شاشة بيع جديد - أهم شاشة في التطبيق، يجب أن تكون سريعة جدًا
 import * as db from './database.js';
 import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, emptyState } from './ui.js';
-import { formatMoney, formatNumber, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, uuid, UNITS } from './utils.js';
+import { formatMoney, formatNumber, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, uuid, UNITS, isValidPhone } from './utils.js';
 
 let saleState;
 let editingSaleId = null;
@@ -335,10 +335,12 @@ function openAddCustomerSheet(container) {
   overlay.querySelector('#nc-save').onclick = async () => {
     const name = overlay.querySelector('#nc-name').value.trim();
     if (!name) return toastError('أدخل اسم الزبون');
+    const phone = overlay.querySelector('#nc-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#nc-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      const customer = await db.addCustomer({ name, phone: overlay.querySelector('#nc-phone').value.trim(), notes: overlay.querySelector('#nc-notes').value.trim() });
+      const customer = await db.addCustomer({ name, phone, notes: overlay.querySelector('#nc-notes').value.trim() });
       saleState.customer = customer;
       closeSheet();
       toastSuccess('تم إضافة الزبون');

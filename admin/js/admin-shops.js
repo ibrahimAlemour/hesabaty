@@ -2,7 +2,7 @@
 import * as adb from './admin-db.js';
 import { getCurrentAdmin } from './admin-auth.js';
 import {
-  formatMoney, formatDate, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce,
+  formatMoney, formatDate, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, isValidPhone,
   computeShopStatus, statusLabel, statusIcon, daysUntil
 } from './admin-utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from '../../js/ui.js';
@@ -83,6 +83,8 @@ function openCreateShopSheet(container) {
     if (!name) return toastError('أدخل اسم المحل');
     if (!ownerEmail) return toastError('أدخل بريد صاحب المحل');
     if (!ownerPassword || ownerPassword.length < 6) return toastError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    const shopPhone = overlay.querySelector('#ns-phone').value.trim();
+    if (!isValidPhone(shopPhone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const price = parseFloat(overlay.querySelector('#ns-price').value) || 0;
     const months = parseInt(overlay.querySelector('#ns-months').value) || 1;
     setLoading(btn, true, 'جاري الإنشاء...');
@@ -90,7 +92,7 @@ function openCreateShopSheet(container) {
       const admin = await getCurrentAdmin();
       const result = await adb.createShopWithLogin({
         shopName: name, ownerName: overlay.querySelector('#ns-owner').value.trim(),
-        phone: overlay.querySelector('#ns-phone').value.trim(), address: overlay.querySelector('#ns-address').value.trim(),
+        phone: shopPhone, address: overlay.querySelector('#ns-address').value.trim(),
         monthlyPrice: price, months, ownerEmail, ownerPassword
       });
       await adb.logAdminAction(admin, 'create_shop', result.shop.id, { name, price, months, ownerEmail });
@@ -426,10 +428,11 @@ function openEditShopSheet(container, shop) {
   overlay.querySelector('#es-save').onclick = async () => {
     const name = overlay.querySelector('#es-name').value.trim();
     if (!name) return toastError('أدخل اسم المحل');
+    const phone = overlay.querySelector('#es-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#es-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      const phone = overlay.querySelector('#es-phone').value.trim();
       const address = overlay.querySelector('#es-address').value.trim();
       await adb.updateShop(shop.id, {
         name, owner_name: overlay.querySelector('#es-owner').value.trim(),

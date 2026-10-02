@@ -2,7 +2,7 @@
 // نظام مستقل تمامًا عن شاشات الزبائن (customers.js): حساب ورصيد وسجل حركات وفواتير خاصة بكل مورد، بدون أي تشارك بينهما
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, startOfDay, endOfDay } from './utils.js';
+import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, startOfDay, endOfDay, isValidPhone } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
 
 export async function renderSupplierList(container) {
@@ -59,11 +59,13 @@ function openAddSupplierSheet(container, onSaved) {
   overlay.querySelector('#ns-save').onclick = async () => {
     const name = overlay.querySelector('#ns-name').value.trim();
     if (!name) return toastError('أدخل اسم المورد');
+    const phone = overlay.querySelector('#ns-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#ns-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       const supplier = await db.addSupplier({
-        name, phone: overlay.querySelector('#ns-phone').value.trim(),
+        name, phone,
         address: overlay.querySelector('#ns-address').value.trim(),
         notes: overlay.querySelector('#ns-notes').value.trim()
       });
@@ -454,11 +456,13 @@ function openEditSupplierSheet(supplier, onSaved) {
   overlay.querySelector('#es-save').onclick = async () => {
     const name = overlay.querySelector('#es-name').value.trim();
     if (!name) return toastError('أدخل اسم المورد');
+    const phone = overlay.querySelector('#es-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#es-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       await db.updateSupplier(supplier.id, {
-        name, phone: overlay.querySelector('#es-phone').value.trim(),
+        name, phone,
         address: overlay.querySelector('#es-address').value.trim(),
         notes: overlay.querySelector('#es-notes').value.trim()
       });

@@ -7,7 +7,7 @@ import {
   getCashierEmail, resetCashierPassword, updateCashierName
 } from './auth.js';
 import { getPendingCount, getPendingItems, flushQueue, discardItem } from './sync.js';
-import { escapeHtml, formatDateTime } from './utils.js';
+import { escapeHtml, formatDateTime, isValidPhone } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
 import { wireInstallButton, showIOSInstallInstructions } from './pwa-install.js';
@@ -136,12 +136,14 @@ function bind(container, settings, supabaseCashiers) {
   wireInstallButton(container.querySelector('#pwa-install-btn'), { onIOSInstructions: showIOSInstallInstructions });
 
   container.querySelector('#st-save-shop').onclick = async () => {
+    const phone = container.querySelector('#st-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = container.querySelector('#st-save-shop');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       await db.updateSettings({
         shopName: container.querySelector('#st-shop-name').value.trim() || settings.shopName,
-        phone: container.querySelector('#st-phone').value.trim(),
+        phone,
         address: container.querySelector('#st-address').value.trim(),
         timezone: container.querySelector('#st-timezone').value
       });

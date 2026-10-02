@@ -1,5 +1,5 @@
 // أدوات مساعدة خاصة بلوحة المدير العام
-export { formatMoney, formatDateTime, formatDate, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, uuid, nowISO } from '../../js/utils.js';
+export { formatMoney, formatDateTime, formatDate, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, uuid, nowISO, isValidPhone } from '../../js/utils.js';
 
 const STATUS_LABELS = {
   active: 'نشط', expired: 'منتهي', overdue: 'متأخر بالدفع', suspended: 'معلّق', pending: 'قيد الإعداد'

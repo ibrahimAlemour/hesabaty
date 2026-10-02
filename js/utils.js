@@ -123,6 +123,14 @@ export function fuzzyMatch(text, query) {
   return normalizeArabic(text).includes(normalizeArabic(query));
 }
 
+// رقم الجوال حقل اختياري بمعظم شاشات التطبيق، لذا لا نرفض القيمة الفارغة هنا؛ الشاشة نفسها تقرر إن كان الحقل
+// مطلوبًا. عند إدخال قيمة فعلية، يجب أن تكون أرقامًا فقط بطول 10 أرقام تمامًا (مثل 0599999999)
+export function isValidPhone(phone) {
+  const trimmed = String(phone || '').trim();
+  if (!trimmed) return true;
+  return /^\d{10}$/.test(trimmed);
+}
+
 export function debounce(fn, wait = 250) {
   let t;
   return (...args) => {

@@ -1,7 +1,7 @@
 // شاشات الزبائن: القائمة، إضافة، تفاصيل الحساب، تسجيل دفعة
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, toCents, startOfDay, endOfDay } from './utils.js';
+import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, toCents, startOfDay, endOfDay, isValidPhone } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
 
 export async function renderCustomerList(container) {
@@ -95,11 +95,13 @@ function openAddCustomerSheet(container, onSaved) {
   overlay.querySelector('#nc-save').onclick = async () => {
     const name = overlay.querySelector('#nc-name').value.trim();
     if (!name) return toastError('أدخل اسم الزبون');
+    const phone = overlay.querySelector('#nc-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#nc-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       const customer = await db.addCustomer({
-        name, phone: overlay.querySelector('#nc-phone').value.trim(), notes: overlay.querySelector('#nc-notes').value.trim(),
+        name, phone, notes: overlay.querySelector('#nc-notes').value.trim(),
         payment_cycle: overlay.querySelector('#nc-cycle').value || null
       });
       closeSheet();
@@ -546,11 +548,13 @@ function openEditCustomerSheet(customer, onSaved) {
   overlay.querySelector('#ec-save').onclick = async () => {
     const name = overlay.querySelector('#ec-name').value.trim();
     if (!name) return toastError('أدخل اسم الزبون');
+    const phone = overlay.querySelector('#ec-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#ec-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       await db.updateCustomer(customer.id, {
-        name, phone: overlay.querySelector('#ec-phone').value.trim(), notes: overlay.querySelector('#ec-notes').value.trim(),
+        name, phone, notes: overlay.querySelector('#ec-notes').value.trim(),
         payment_cycle: overlay.querySelector('#ec-cycle').value || null,
         sms_excluded: overlay.querySelector('#ec-sms-excluded').checked
       });

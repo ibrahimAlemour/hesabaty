@@ -3,7 +3,7 @@
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
 import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, confirmDialog, emptyState } from './ui.js';
-import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS } from './utils.js';
+import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS, isValidPhone } from './utils.js';
 import { renderAttachmentsSection } from './attachments.js';
 
 let purchaseState;
@@ -427,10 +427,12 @@ function openAddSupplierSheet(container) {
   overlay.querySelector('#ns-save').onclick = async () => {
     const name = overlay.querySelector('#ns-name').value.trim();
     if (!name) return toastError('أدخل اسم المورد');
+    const phone = overlay.querySelector('#ns-phone').value.trim();
+    if (!isValidPhone(phone)) return toastError('رقم الجوال يجب أن يكون 10 أرقام فقط');
     const btn = overlay.querySelector('#ns-save');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      const supplier = await db.addSupplier({ name, phone: overlay.querySelector('#ns-phone').value.trim() });
+      const supplier = await db.addSupplier({ name, phone });
       purchaseState.supplier = supplier;
       closeSheet();
       toastSuccess('تم إضافة المورد');

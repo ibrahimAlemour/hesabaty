@@ -470,7 +470,7 @@ export async function getCustomerLedger(customerId) {
     ...sales.map(s => ({
       type: 'sale', id: s.id, date: s.created_at, amount: s.paid_debt,
       label: `فاتورة ${s.invoice_number}`, description: 'فاتورة بيع (دين)', reference: s.invoice_number,
-      direction: 'debt'
+      direction: 'debt', notes: s.notes
     })),
     ...payments.map(p => ({
       type: 'payment', id: p.id, date: p.created_at, amount: p.amount,
@@ -849,7 +849,7 @@ export async function getSupplierLedger(supplierId) {
     ...purchases.map(p => ({
       type: 'purchase', id: p.id, date: p.created_at, amount: p.paid_credit,
       label: `فاتورة شراء ${p.purchase_number}`, description: 'فاتورة شراء', reference: p.purchase_number,
-      direction: 'debt'
+      direction: 'debt', notes: p.notes
     })),
     ...payments.map(p => ({
       type: 'supplier_payment', id: p.id, date: p.created_at, amount: p.amount,

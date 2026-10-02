@@ -186,10 +186,24 @@ export async function renderCustomerDetail(container, customerId) {
     });
     root.querySelectorAll('[data-ledger-delete]').forEach(el => el.onclick = async (ev) => {
       ev.stopPropagation();
+      const [type, id] = el.dataset.ledgerDelete.split(':');
+      const entry = ledger.find(e => e.type === type && e.id === id);
+      if (type === 'sale') {
+        const ok = await confirmDialog({ title: 'حذف الفاتورة', message: `سيتم حذف فاتورة ${entry ? entry.reference || entry.label : ''} كاملة بكل بنودها، وستتأثر أرصدة الزبون والصندوق. لا يمكن التراجع عن هذا الإجراء.` });
+        if (!ok) return;
+        try {
+          await db.deleteSale(id);
+          toastSuccess('تم حذف الفاتورة');
+          renderCustomerDetail(container, customerId);
+        } catch (err) {
+          toastError(err.message || 'حدث خطأ أثناء الحذف');
+        }
+        return;
+      }
       const ok = await confirmDialog({ title: 'حذف الدفعة', message: 'سيتم حذف هذه الدفعة وستتأثر أرصدة الزبون والصندوق.' });
       if (!ok) return;
       try {
-        await db.deletePayment(el.dataset.ledgerDelete);
+        await db.deletePayment(id);
         toastSuccess('تم حذف الدفعة');
         renderCustomerDetail(container, customerId);
       } catch (err) {
@@ -273,11 +287,11 @@ export async function renderCustomerDetail(container, customerId) {
   }
 }
 
-// حذف الحركة متاح فقط لحركات الدفعات (نفس نمط suppliers.js) - حذف حركة دين (فاتورة بيع) يبقى فقط
-// من شاشة الفاتورة نفسها لأنه عملية أعقد (تمسح بنود الفاتورة وتؤثر على المخزون المفاهيمي، لا مجرد صف واحد)
+// حذف حركة دفعة يحذف الدفعة فقط؛ حذف حركة دين (فاتورة بيع) يحذف الفاتورة كاملة (كل بنودها) تمامًا
+// مثل زر "حذف الفاتورة" بشاشة الفاتورة نفسها - كلاهما متاح فقط لصاحب المحل (canManage)
 function ledgerRow(entry, canManage) {
   const isDebt = entry.direction === 'debt';
-  const canDeletePayment = canManage && entry.type === 'payment';
+  const canDeleteEntry = canManage && (entry.type === 'payment' || entry.type === 'sale');
   return `
     <div class="list-item" style="cursor:pointer;" data-ledger-open="${entry.type}:${entry.id}">
       <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
@@ -286,7 +300,7 @@ function ledgerRow(entry, canManage) {
         <div class="subtitle">${formatDateTime(entry.date)}</div>
       </div>
       <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
-      ${canDeletePayment ? `<button class="remove-btn" data-ledger-delete="${entry.id}">
+      ${canDeleteEntry ? `<button class="remove-btn" data-ledger-delete="${entry.type}:${entry.id}">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
       </button>` : ''}
     </div>`;

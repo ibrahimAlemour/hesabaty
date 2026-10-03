@@ -27,6 +27,10 @@ export async function renderCashierHome(container) {
         <div style="font-size:40px;">🚚</div>
         <div style="font-weight:800;font-size:15px;">التجار</div>
       </div>
+      <div data-nav="#/debts" style="grid-column:1 / -1;background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:20px 10px;display:flex;align-items:center;justify-content:center;gap:12px;cursor:pointer;">
+        <div style="font-size:28px;">💳</div>
+        <div style="font-weight:800;font-size:15px;">الديون</div>
+      </div>
     </div>
     <button class="btn btn-outline btn-block" id="cashier-logout" style="margin-top:40px;">تسجيل الخروج</button>
   `;

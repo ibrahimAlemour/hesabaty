@@ -24,7 +24,7 @@ import { renderSupplierList, renderSupplierDetail, renderSupplierStatement } fro
 import { renderPurchaseList, renderNewPurchase, renderEditPurchase, renderPurchaseInvoice } from './purchases.js';
 import {
   renderCashierHome, renderCashierCustomerList, renderCashierCustomerDetail,
-  renderCashierSupplierList, renderCashierSupplierDetail
+  renderCashierSupplierList, renderCashierSupplierDetail, renderCashierDebts
 } from './cashier.js';
 import './pwa-install.js';
 
@@ -54,10 +54,11 @@ const CASHIER_NAV_ITEMS = [
 ];
 const CASHIER_MORE_ITEMS = [
   { path: '#/customers', label: 'الزبائن', icon: '👥' },
-  { path: '#/suppliers', label: 'التجار', icon: '🚚' }
+  { path: '#/suppliers', label: 'التجار', icon: '🚚' },
+  { path: '#/debts', label: 'الديون', icon: '💳' }
 ];
 // أي مسار آخر يحاول الكاشير فتحه (عبر رابط قديم أو تعديل يدوي للرابط) يُعاد توجيهه للرئيسية فورًا
-const CASHIER_ALLOWED_HASH = /^#\/(dashboard|more|customers(\/[\w-]+)?(\/statement)?|suppliers(\/[\w-]+)?(\/statement)?|purchase\/[\w-]+)$/;
+const CASHIER_ALLOWED_HASH = /^#\/(dashboard|more|customers(\/[\w-]+)?(\/statement)?|suppliers(\/[\w-]+)?(\/statement)?|purchase\/[\w-]+|debts)$/;
 
 const MORE_ITEMS = [
   { path: '#/products', label: 'المنتجات', icon: '📦' },
@@ -83,7 +84,7 @@ const ROUTES = [
   { pattern: /^#\/products$/, title: 'المنتجات', showBack: true, render: () => renderProductList(appContent) },
   { pattern: /^#\/inventory$/, title: 'المخزون', showBack: true, render: () => renderInventory(appContent) },
   { pattern: /^#\/categories$/, title: 'التصنيفات', showBack: true, render: () => renderCategories(appContent) },
-  { pattern: /^#\/debts$/, title: 'الديون', showBack: true, render: () => renderDebts(appContent) },
+  { pattern: /^#\/debts$/, title: 'الديون', showBack: true, render: (m, isCashier) => isCashier ? renderCashierDebts(appContent) : renderDebts(appContent) },
   { pattern: /^#\/suppliers$/, title: 'الموردون', showBack: true, render: (m, isCashier) => isCashier ? renderCashierSupplierList(appContent) : renderSupplierList(appContent) },
   { pattern: /^#\/suppliers\/([\w-]+)$/, title: 'حساب المورد', showBack: true, render: (m, isCashier) => isCashier ? renderCashierSupplierDetail(appContent, m[1]) : renderSupplierDetail(appContent, m[1]) },
   { pattern: /^#\/suppliers\/([\w-]+)\/statement$/, title: 'كشف حساب المورد', showBack: true, render: (m) => renderSupplierStatement(appContent, m[1]) },

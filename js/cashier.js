@@ -6,6 +6,7 @@ import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, deboun
 import { confirmDialog, emptyState } from './ui.js';
 
 const LIST_LIMIT = 80;
+let cashierDebtCycle = 'all';
 
 export async function renderCashierHome(container) {
   const user = await getCurrentUser();
@@ -278,4 +279,139 @@ export async function renderCashierSupplierDetail(container, supplierId) {
   renderTab('invoices');
 
   container.querySelector('#cashier-statement-btn').onclick = () => { window.location.hash = `#/suppliers/${supplier.id}/statement`; };
+}
+
+// ---------- الديون (عرض فقط) ----------
+// مرآة لـjs/debts.js بنفس التصميم تمامًا (البطاقة الإحصائية، البحث، التبويبات، بطاقات المتأخرين)،
+// فقط بدون زر "تحصيل" لأن الكاشير ممنوع من أي إجراء مالي - الضغط على الصف يفتح حساب الزبون للعرض فقط
+
+export async function renderCashierDebts(container) {
+  container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
+  const all = await db.getCustomersWithBalance();
+  const debtors = all.filter(c => c.balance > 0).sort((a, b) => b.balance - a.balance);
+  const total = debtors.reduce((s, c) => s + c.balance, 0);
+  cashierDebtCycle = 'all';
+  renderCashierDebtsList(container, debtors, total, '');
+}
+
+function cashierDaysLate(dueDate) {
+  const ms = new Date().setHours(0, 0, 0, 0) - new Date(dueDate).setHours(0, 0, 0, 0);
+  return Math.max(1, Math.round(ms / 86400000));
+}
+
+function renderCashierDebtsList(container, debtors, total, query) {
+  if (cashierDebtCycle === 'overdue') {
+    container.innerHTML = `
+      <div id="cashier-debt-stat-card"></div>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input type="text" id="cashier-debt-search" placeholder="ابحث عن زبون..." value="${escapeHtml(query)}">
+      </div>
+      ${cashierDebtTabsHtml()}
+      <div id="cashier-debt-list-results"></div>
+    `;
+
+    const renderResults = (q) => {
+      const filtered = q ? debtors.filter(c => fuzzyMatch(c.name, q)) : debtors;
+      const overdueList = filtered
+        .filter(c => c.dueDate && new Date(c.dueDate) < new Date())
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+      const overdueTotal = overdueList.reduce((s, c) => s + c.balance, 0);
+      container.querySelector('#cashier-debt-stat-card').innerHTML = `
+        <div class="card" style="text-align:center;background:var(--danger-light);">
+          <div class="stat-label" style="justify-content:center;color:var(--danger);">🔴 الزبائن المتأخرون</div>
+          <div class="stat-value" style="color:var(--danger);font-size:26px;">${overdueList.length}</div>
+          <div style="font-size:13px;color:var(--danger);margin-top:6px;font-weight:700;">إجمالي المبالغ المتأخرة: ${formatMoney(overdueTotal)}</div>
+        </div>`;
+      container.querySelector('#cashier-debt-list-results').innerHTML = overdueList.length ? overdueList.map(cashierOverdueCard).join('') : emptyState('✅', 'لا يوجد زبائن متأخرون حاليًا');
+      bindCashierDebtRowEvents(container);
+    };
+    renderResults(query);
+
+    container.querySelector('#cashier-debt-search').oninput = debounce((e) => renderResults(e.target.value), 150);
+    bindCashierDebtTabEvents(container, debtors, total);
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label" style="justify-content:center;">إجمالي الديون المستحقة</div>
+      <div class="stat-value" style="color:var(--danger);font-size:26px;">${formatMoney(total)}</div>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px;">${debtors.length} زبون عليهم رصيد</div>
+    </div>
+    <div class="search-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" id="cashier-debt-search" placeholder="ابحث عن زبون..." value="${escapeHtml(query)}">
+    </div>
+    ${cashierDebtTabsHtml()}
+    <div class="card" style="padding:6px 10px;" id="cashier-debt-list-results"></div>
+  `;
+
+  const renderResults = (q) => {
+    let filtered = q ? debtors.filter(c => fuzzyMatch(c.name, q)) : debtors;
+    if (cashierDebtCycle !== 'all') filtered = filtered.filter(c => (c.payment_cycle || 'none') === cashierDebtCycle);
+    container.querySelector('#cashier-debt-list-results').innerHTML = filtered.length ? filtered.map(cashierDebtorRow).join('') : emptyState('✅', 'لا توجد ديون مستحقة');
+    bindCashierDebtRowEvents(container);
+  };
+  renderResults(query);
+
+  container.querySelector('#cashier-debt-search').oninput = debounce((e) => renderResults(e.target.value), 150);
+  bindCashierDebtTabEvents(container, debtors, total);
+}
+
+function bindCashierDebtRowEvents(container) {
+  container.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/customers/${el.dataset.open}`);
+}
+
+function bindCashierDebtTabEvents(container, debtors, total) {
+  container.querySelectorAll('[data-cycle]').forEach(btn => btn.onclick = () => {
+    cashierDebtCycle = btn.dataset.cycle;
+    renderCashierDebtsList(container, debtors, total, container.querySelector('#cashier-debt-search').value);
+  });
+}
+
+function cashierDebtTabsHtml() {
+  return `
+    <div class="tabs">
+      <button class="tab-btn ${cashierDebtCycle === 'all' ? 'active' : ''}" data-cycle="all">الكل</button>
+      <button class="tab-btn ${cashierDebtCycle === 'overdue' ? 'active' : ''}" data-cycle="overdue">🔴 متأخرون فقط</button>
+      <button class="tab-btn ${cashierDebtCycle === 'weekly' ? 'active' : ''}" data-cycle="weekly">🗓️ أسبوعي</button>
+      <button class="tab-btn ${cashierDebtCycle === 'monthly' ? 'active' : ''}" data-cycle="monthly">🗓️ شهري</button>
+      <button class="tab-btn ${cashierDebtCycle === 'none' ? 'active' : ''}" data-cycle="none">بدون تحديد</button>
+    </div>`;
+}
+
+function cashierDebtorRow(c) {
+  const cycle = c.payment_cycle && db.PAYMENT_CYCLES[c.payment_cycle];
+  const overdue = c.dueDate && new Date(c.dueDate) < new Date();
+  return `
+    <div class="list-item" style="cursor:pointer;" data-open="${c.id}">
+      <div class="avatar">${escapeHtml(c.name[0])}</div>
+      <div class="info">
+        <div class="title">${escapeHtml(c.name)} ${cycle ? `<span class="badge" style="background:var(--blue-light);color:var(--blue);margin-right:6px;">🗓️ ${cycle.label}</span>` : ''}</div>
+        <div class="subtitle">${c.phone || ''}</div>
+        ${c.dueDate ? `<div class="meta" style="${overdue ? 'color:var(--danger);font-weight:700;' : ''}">${overdue ? 'تجاوز موعد السداد' : 'السداد المتوقع'}: ${formatDate(c.dueDate)}</div>` : ''}
+      </div>
+      <div class="amount debt">${formatMoney(c.balance)}</div>
+    </div>`;
+}
+
+function cashierOverdueCard(c) {
+  const late = cashierDaysLate(c.dueDate);
+  return `
+    <div class="card" style="cursor:pointer;" data-open="${c.id}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div class="avatar" style="width:44px;height:44px;font-size:16px;">${escapeHtml(c.name[0])}</div>
+        <div style="font-weight:800;font-size:15.5px;">${escapeHtml(c.name)}</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-muted);margin-bottom:6px;">
+        <span>تاريخ الاستحقاق</span><span style="font-weight:700;color:var(--text);">${formatDate(c.dueDate)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:14.5px;">
+        <span style="color:var(--text-muted);">المبلغ المستحق</span><span style="font-weight:800;color:var(--danger);font-size:17px;">${formatMoney(c.balance)}</span>
+      </div>
+      <div style="margin-top:12px;">
+        <span class="badge" style="background:var(--danger-light);color:var(--danger);font-size:13px;padding:7px 14px;font-weight:800;">🔴 متأخر ${late} يوم</span>
+      </div>
+    </div>`;
 }

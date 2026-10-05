@@ -2,7 +2,7 @@
 // المقصود بفواتير الشراء هنا: الفواتير التي يشتري بها صاحب المحل البضاعة من الموردين، وليست فواتير بيع للزبائن
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, confirmDialog, emptyState } from './ui.js';
+import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, confirmDialog, emptyState, renderPaginatedList } from './ui.js';
 import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS, isValidPhone } from './utils.js';
 import { renderAttachmentsSection } from './attachments.js';
 
@@ -46,8 +46,10 @@ function renderListScreen(container, purchases, query) {
       ? purchases.filter(p => fuzzyMatch(p.supplier_name_snapshot, q) || (p.purchase_number || '').includes(q) || (p.supplier_invoice_number || '').includes(q))
       : purchases;
     const resultsEl = container.querySelector('#purchase-list-results');
-    resultsEl.innerHTML = filtered.length ? filtered.map(purchaseRow).join('') : emptyState('🧾', 'لا توجد فواتير شراء', 'أضف أول فاتورة شراء للبدء');
-    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/purchase/${el.dataset.open}`);
+    renderPaginatedList(resultsEl, filtered, purchaseRow, {
+      emptyIcon: '🧾', emptyText: 'لا توجد فواتير شراء', emptySubtext: 'أضف أول فاتورة شراء للبدء',
+      onRender: () => resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/purchase/${el.dataset.open}`)
+    });
   };
   renderResults(query);
 
@@ -460,7 +462,7 @@ function openProductSheet(container) {
   `, { onOpen: (el) => el.querySelector('#product-search').focus() });
 
   const renderResults = (q) => {
-    const list = container._allProducts.filter(p => fuzzyMatch(p.name, q));
+    const list = container._allProducts.filter(p => fuzzyMatch(p.name, q)).slice(0, 30);
     overlay.querySelector('#product-results').innerHTML = list.length ? list.map(p => `
       <div class="list-item" style="cursor:pointer;" data-pick="${p.id}">
         <div class="avatar">${productEmoji(p, container._categoryIcons)}</div>

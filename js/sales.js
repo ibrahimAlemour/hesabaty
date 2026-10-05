@@ -239,7 +239,7 @@ function openProductSheet(container) {
   `, { onOpen: (el) => el.querySelector('#product-search').focus() });
 
   const renderResults = (q) => {
-    const list = container._allProducts.filter(p => fuzzyMatch(p.name, q));
+    const list = container._allProducts.filter(p => fuzzyMatch(p.name, q)).slice(0, 30);
     overlay.querySelector('#product-results').innerHTML = list.length ? list.map(p => `
       <div class="list-item" style="cursor:pointer;" data-pick="${p.id}">
         <div class="avatar">${productEmoji(p, container._categoryIcons)}</div>

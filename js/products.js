@@ -2,7 +2,7 @@
 import * as db from './database.js';
 import { getCurrentUser, canDelete } from './auth.js';
 import { formatMoney, escapeHtml, fuzzyMatch, debounce, UNITS } from './utils.js';
-import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
+import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, renderPaginatedList } from './ui.js';
 
 let currentCategory = 'all';
 let currentQuery = '';
@@ -45,10 +45,12 @@ function renderList(container, products) {
     if (currentCategory !== 'all') filtered = filtered.filter(p => p.category_id === currentCategory);
     if (q) filtered = filtered.filter(p => fuzzyMatch(p.name, q));
     const resultsEl = container.querySelector('#product-list-results');
-    resultsEl.innerHTML = filtered.length ? filtered.map(p => productRow(p, categories)).join('') : emptyState('📦', 'لا توجد منتجات');
-    resultsEl.querySelectorAll('[data-edit]').forEach(el => el.onclick = () => {
-      const p = products.find(x => x.id === el.dataset.edit);
-      openProductForm(container, p, () => renderProductList(container));
+    renderPaginatedList(resultsEl, filtered, p => productRow(p, categories), {
+      emptyIcon: '📦', emptyText: 'لا توجد منتجات',
+      onRender: () => resultsEl.querySelectorAll('[data-edit]').forEach(el => el.onclick = () => {
+        const p = products.find(x => x.id === el.dataset.edit);
+        openProductForm(container, p, () => renderProductList(container));
+      })
     });
   };
   renderResults(currentQuery);

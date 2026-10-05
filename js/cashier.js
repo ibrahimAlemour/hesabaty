@@ -3,7 +3,7 @@
 import * as db from './database.js';
 import { getCurrentUser, signOut } from './auth.js';
 import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce } from './utils.js';
-import { confirmDialog, emptyState } from './ui.js';
+import { confirmDialog, emptyState, renderPaginatedList } from './ui.js';
 
 const LIST_LIMIT = 80;
 let cashierDebtCycle = 'all';
@@ -82,8 +82,10 @@ function renderCustomerListView(container, customers, query) {
   const renderResults = (q) => {
     const filtered = q ? customers.filter(c => fuzzyMatch(c.name, q) || (c.phone && c.phone.includes(q))) : customers;
     const resultsEl = container.querySelector('#cashier-customer-results');
-    resultsEl.innerHTML = filtered.length ? filtered.map(cashierCustomerRow).join('') : emptyState('👥', 'لا يوجد زبائن');
-    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/customers/${el.dataset.open}`; });
+    renderPaginatedList(resultsEl, filtered, cashierCustomerRow, {
+      emptyIcon: '👥', emptyText: 'لا يوجد زبائن',
+      onRender: () => resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/customers/${el.dataset.open}`; })
+    });
   };
   renderResults(query);
 
@@ -178,8 +180,10 @@ function renderSupplierListView(container, suppliers, query) {
   const renderResults = (q) => {
     const filtered = q ? suppliers.filter(s => fuzzyMatch(s.name, q) || (s.phone && s.phone.includes(q))) : suppliers;
     const resultsEl = container.querySelector('#cashier-supplier-results');
-    resultsEl.innerHTML = filtered.length ? filtered.map(cashierSupplierRow).join('') : emptyState('🚚', 'لا يوجد تجار');
-    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/suppliers/${el.dataset.open}`; });
+    renderPaginatedList(resultsEl, filtered, cashierSupplierRow, {
+      emptyIcon: '🚚', emptyText: 'لا يوجد تجار',
+      onRender: () => resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { window.location.hash = `#/suppliers/${el.dataset.open}`; })
+    });
   };
   renderResults(query);
 
@@ -327,8 +331,10 @@ function renderCashierDebtsList(container, debtors, total, query) {
           <div class="stat-value" style="color:var(--danger);font-size:26px;">${overdueList.length}</div>
           <div style="font-size:13px;color:var(--danger);margin-top:6px;font-weight:700;">إجمالي المبالغ المتأخرة: ${formatMoney(overdueTotal)}</div>
         </div>`;
-      container.querySelector('#cashier-debt-list-results').innerHTML = overdueList.length ? overdueList.map(cashierOverdueCard).join('') : emptyState('✅', 'لا يوجد زبائن متأخرون حاليًا');
-      bindCashierDebtRowEvents(container);
+      renderPaginatedList(container.querySelector('#cashier-debt-list-results'), overdueList, cashierOverdueCard, {
+        emptyIcon: '✅', emptyText: 'لا يوجد زبائن متأخرون حاليًا',
+        onRender: () => bindCashierDebtRowEvents(container)
+      });
     };
     renderResults(query);
 
@@ -354,8 +360,10 @@ function renderCashierDebtsList(container, debtors, total, query) {
   const renderResults = (q) => {
     let filtered = q ? debtors.filter(c => fuzzyMatch(c.name, q)) : debtors;
     if (cashierDebtCycle !== 'all') filtered = filtered.filter(c => (c.payment_cycle || 'none') === cashierDebtCycle);
-    container.querySelector('#cashier-debt-list-results').innerHTML = filtered.length ? filtered.map(cashierDebtorRow).join('') : emptyState('✅', 'لا توجد ديون مستحقة');
-    bindCashierDebtRowEvents(container);
+    renderPaginatedList(container.querySelector('#cashier-debt-list-results'), filtered, cashierDebtorRow, {
+      emptyIcon: '✅', emptyText: 'لا توجد ديون مستحقة',
+      onRender: () => bindCashierDebtRowEvents(container)
+    });
   };
   renderResults(query);
 

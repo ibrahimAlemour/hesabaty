@@ -1,7 +1,7 @@
 // المخزون: كم بيع من كل منتج موجود بالمحل اليوم (بالوزن أو بالقطعة حسب وحدة كل منتج)
 import * as db from './database.js';
 import { formatNumber, escapeHtml, fuzzyMatch, debounce, todayLabel } from './utils.js';
-import { emptyState } from './ui.js';
+import { renderPaginatedList } from './ui.js';
 
 let currentCategory = 'all';
 let currentQuery = '';
@@ -38,7 +38,9 @@ function renderList(container, items) {
     let filtered = items;
     if (currentCategory !== 'all') filtered = filtered.filter(i => i.category_id === currentCategory);
     if (q) filtered = filtered.filter(i => fuzzyMatch(i.name, q));
-    container.querySelector('#inv-list-results').innerHTML = filtered.length ? filtered.map(i => itemRow(i, categories)).join('') : emptyState('📦', 'لا توجد منتجات مطابقة');
+    renderPaginatedList(container.querySelector('#inv-list-results'), filtered, i => itemRow(i, categories), {
+      emptyIcon: '📦', emptyText: 'لا توجد منتجات مطابقة'
+    });
   };
   renderResults(currentQuery);
 

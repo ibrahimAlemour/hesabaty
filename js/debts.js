@@ -2,7 +2,7 @@
 import * as db from './database.js';
 import { openRecordPaymentSheet } from './customers.js';
 import { formatMoney, formatDate, escapeHtml, fuzzyMatch, debounce } from './utils.js';
-import { emptyState } from './ui.js';
+import { renderPaginatedList } from './ui.js';
 
 let currentCycle = 'all';
 
@@ -50,8 +50,10 @@ function renderList(container, debtors, total, query) {
           <div class="stat-value" style="color:var(--danger);font-size:26px;">${overdueList.length}</div>
           <div style="font-size:13px;color:var(--danger);margin-top:6px;font-weight:700;">إجمالي المبالغ المتأخرة: ${formatMoney(overdueTotal)}</div>
         </div>`;
-      container.querySelector('#debt-list-results').innerHTML = overdueList.length ? overdueList.map(overdueCard).join('') : emptyState('✅', 'لا يوجد زبائن متأخرون حاليًا');
-      bindRowEvents(container, () => activeList);
+      renderPaginatedList(container.querySelector('#debt-list-results'), overdueList, overdueCard, {
+        emptyIcon: '✅', emptyText: 'لا يوجد زبائن متأخرون حاليًا',
+        onRender: () => bindRowEvents(container, () => activeList)
+      });
     };
     renderResults(query);
 
@@ -79,8 +81,10 @@ function renderList(container, debtors, total, query) {
     let filtered = q ? debtors.filter(c => fuzzyMatch(c.name, q)) : debtors;
     if (currentCycle !== 'all') filtered = filtered.filter(c => (c.payment_cycle || 'none') === currentCycle);
     activeList = filtered;
-    container.querySelector('#debt-list-results').innerHTML = filtered.length ? filtered.map(debtorRow).join('') : emptyState('✅', 'لا توجد ديون مستحقة');
-    bindRowEvents(container, () => activeList);
+    renderPaginatedList(container.querySelector('#debt-list-results'), filtered, debtorRow, {
+      emptyIcon: '✅', emptyText: 'لا توجد ديون مستحقة',
+      onRender: () => bindRowEvents(container, () => activeList)
+    });
   };
   renderResults(query);
 

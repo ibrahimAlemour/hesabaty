@@ -5,7 +5,7 @@ import {
   formatMoney, formatDate, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, isValidPhone,
   computeShopStatus, statusLabel, statusIcon, daysUntil
 } from './admin-utils.js';
-import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from '../../js/ui.js';
+import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState, renderPaginatedList } from '../../js/ui.js';
 
 let cachedQuery = '';
 
@@ -32,8 +32,10 @@ function render(container, shops, query) {
   const renderResults = (q) => {
     const filtered = q ? shops.filter(s => fuzzyMatch(s.name, q) || (s.phone && s.phone.includes(q)) || fuzzyMatch(s.owner_name || '', q)) : shops;
     const resultsEl = container.querySelector('#shop-list-results');
-    resultsEl.innerHTML = filtered.length ? filtered.map(shopRow).join('') : emptyState('🏪', 'لا توجد محلات مطابقة');
-    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/shops/${el.dataset.open}`);
+    renderPaginatedList(resultsEl, filtered, shopRow, {
+      emptyIcon: '🏪', emptyText: 'لا توجد محلات مطابقة',
+      onRender: () => resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/shops/${el.dataset.open}`)
+    });
   };
   renderResults(query);
 

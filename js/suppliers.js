@@ -3,7 +3,7 @@
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
 import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, startOfDay, endOfDay, isValidPhone } from './utils.js';
-import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
+import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState, renderPaginatedList } from './ui.js';
 
 export async function renderSupplierList(container) {
   container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
@@ -26,8 +26,10 @@ function renderList(container, suppliers, query) {
   const renderResults = (q) => {
     const filtered = q ? suppliers.filter(s => fuzzyMatch(s.name, q) || (s.phone && s.phone.includes(q))) : suppliers;
     const resultsEl = container.querySelector('#supplier-list-results');
-    resultsEl.innerHTML = filtered.length ? filtered.map(supplierRow).join('') : emptyState('🚚', 'لا يوجد موردون', 'أضف أول مورد للبدء');
-    resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/suppliers/${el.dataset.open}`);
+    renderPaginatedList(resultsEl, filtered, supplierRow, {
+      emptyIcon: '🚚', emptyText: 'لا يوجد موردون', emptySubtext: 'أضف أول مورد للبدء',
+      onRender: () => resultsEl.querySelectorAll('[data-open]').forEach(el => el.onclick = () => window.location.hash = `#/suppliers/${el.dataset.open}`)
+    });
   };
   renderResults(query);
 

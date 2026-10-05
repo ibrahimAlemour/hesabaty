@@ -98,3 +98,20 @@ export function emptyState(icon, text, subtext = '') {
     ${subtext ? `<p>${escapeHtml(subtext)}</p>` : ''}
   </div>`;
 }
+
+// يعرض أول دفعة فقط من قائمة طويلة (بدل بناء DOM ضخم لآلاف العناصر دفعة واحدة) مع زر "عرض المزيد"
+// يوسّع الدفعة تدريجيًا. البيانات نفسها تُجلب كاملة كما هي الآن (لا تغيير بمنطق الجلب)؛ فقط الرسم بالشاشة
+// يتم تدريجيًا. onRender يُستدعى بعد كل رسم (أولي أو توسيع) لإعادة ربط أحداث الصفوف (data-edit...الخ)
+export function renderPaginatedList(resultsEl, items, rowFn, { pageSize = 30, emptyIcon = '📭', emptyText = 'لا توجد نتائج', emptySubtext = '', onRender } = {}) {
+  if (!items.length) { resultsEl.innerHTML = emptyState(emptyIcon, emptyText, emptySubtext); if (onRender) onRender(); return; }
+  let shown = Math.min(pageSize, items.length);
+  const draw = () => {
+    const remaining = items.length - shown;
+    resultsEl.innerHTML = items.slice(0, shown).map(rowFn).join('') +
+      (remaining > 0 ? `<button class="btn btn-secondary btn-block" data-load-more style="margin-top:10px;">عرض المزيد (${remaining} متبقي)</button>` : '');
+    const btn = resultsEl.querySelector('[data-load-more]');
+    if (btn) btn.onclick = () => { shown = Math.min(shown + pageSize, items.length); draw(); };
+    if (onRender) onRender();
+  };
+  draw();
+}

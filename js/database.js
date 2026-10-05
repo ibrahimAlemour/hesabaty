@@ -161,6 +161,20 @@ async function writeRecord(storeName, record) {
   return record;
 }
 
+// حاجز حماية إضافي (دفاع بعمق) ضد عرض بيانات محل آخر: يُرجع فقط سجلات مخزن محلي تخص المحل الحالي فعليًا.
+// التخزين المحلي (IndexedDB) مشترك على مستوى المتصفح/الجهاز ولا علاقة له تلقائيًا بمعرّف المحل - نعتمد أصلًا
+// على clearBusinessData() لمسحه بالكامل عند اكتشاف تبديل محل بتسجيل الدخول (راجع auth.js)، لكن أي ثغرة أو حالة
+// حافة بذلك الاكتشاف (أو بقايا من جلسة/اختبار سابق على نفس الجهاز) تترك سجلات محل آخر عالقة محليًا للأبد دون
+// أي تنبيه - لأن pullFromRemote لا يحذف محليًا إلا ما كان "يتيمًا" مقارنة بالمحل *الحالي*، لا كل محل آخر.
+// هذا الفلتر يمنع ظهور أي سجل كهذا نهائيًا بغضّ النظر عن سبب وجوده محليًا. سجلات أُنشئت للتو بهذه الجلسة
+// ولم تُرفع/تُسحب بعد (بلا shop_id محليًا) تبقى ظاهرة بأمان لأنها بالتعريف تخص المحل الحالي.
+async function localGetAll(storeName) {
+  const rows = await localDb.getAll(storeName);
+  const s = await getSettings();
+  if (s.backendMode !== 'supabase' || !s.currentShopId) return rows;
+  return rows.filter(r => !r.shop_id || r.shop_id === s.currentShopId);
+}
+
 // يسحب كل بيانات المحل من سوبابيس ويحدّث النسخة المحلية (IndexedDB) - يُستدعى بعد تسجيل الدخول وعند بدء التطبيق
 // بذلك يمكن رؤية نفس البيانات من أي جهاز جديد يسجّل دخوله بنفس الحساب
 const REMOTE_PULL_STORES = ['categories', 'customers', 'products', 'sales', 'saleItems', 'payments', 'expenses', 'cashTransactions', 'auditLog', 'smsTemplates', 'smsSchedules', 'smsLog', 'suppliers', 'purchases', 'purchaseItems', 'supplierPayments'];
@@ -184,10 +198,12 @@ export async function pullFromRemote() {
   const s = await getSettings();
   if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
 
-  // هذه المخازن قابلة لتكوّن نسخ محلية "يتيمة" لا وجود لها على الخادم بعد أي تصحيح بيانات مباشر بقاعدة البيانات
-  // (مثل حذف أصناف/حركات صندوق مكررة عبر SQL)، أو بعد أي حذف/تعديل قديم لم يُرفع وقته بسبب خلل مصحَّح الآن.
-  // لذلك بعد كل سحب نطابق المحلي مع الخادم ونحذف محليًا كل صف لم يعد موجودًا هناك، ما عدا ما هو بانتظار الرفع فعليًا
-  const RECONCILE_DELETIONS_STORES = new Set(['categories', 'saleItems', 'purchaseItems', 'cashTransactions']);
+  // كل المخازن المسحوبة قابلة لتكوّن نسخًا محلية "يتيمة" لا وجود لها على الخادم: إما بسبب تصحيح بيانات مباشر
+  // بقاعدة البيانات، أو حذف/تعديل قديم لم يُرفع وقته، أو (الأهم) سجلات محل آخر عالقة محليًا من تبديل محل سابق
+  // على نفس الجهاز لم تُمسح لأي سبب (حالة حقيقية حصلت فعليًا: مورد من محل آخر ظهر محليًا رغم عدم وجوده بسحب
+  // المحل الحالي من سوبابيس). لذلك نطابق المحلي مع الخادم لكل مخزن بعد كل سحب ونحذف محليًا كل صف لم يعد موجودًا
+  // هناك، ما عدا ما هو بانتظار الرفع فعليًا - لا نقتصر على بعض المخازن فقط كما كان سابقًا
+  const RECONCILE_DELETIONS_STORES = new Set(REMOTE_PULL_STORES);
 
   for (const storeName of REMOTE_PULL_STORES) {
     try {
@@ -225,7 +241,7 @@ async function addAudit(entityType, entityId, action, changes) {
 }
 
 export async function getAuditLog(limit = 50) {
-  const rows = await localDb.getAll('auditLog');
+  const rows = await localGetAll('auditLog');
   return rows.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit);
 }
 
@@ -241,7 +257,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export async function ensureDefaultCategories() {
-  const existing = await localDb.getAll('categories');
+  const existing = await localGetAll('categories');
   if (existing.length) return existing;
   const created = [];
   for (const c of DEFAULT_CATEGORIES) {
@@ -253,7 +269,7 @@ export async function ensureDefaultCategories() {
 }
 
 export async function getCategories() {
-  const rows = await localDb.getAll('categories');
+  const rows = await localGetAll('categories');
   return rows.length ? rows : ensureDefaultCategories();
 }
 
@@ -287,7 +303,7 @@ async function removeRecord(storeName, id) {
 }
 
 export async function deleteCategory(id) {
-  const products = await localDb.getAll('products');
+  const products = await localGetAll('products');
   if (products.some(p => p.category_id === id)) {
     throw new Error('لا يمكن حذف هذا التصنيف لأنه مستخدم بمنتجات. غيّر تصنيف تلك المنتجات أولًا.');
   }
@@ -296,7 +312,7 @@ export async function deleteCategory(id) {
 
 // ---------- المنتجات ----------
 export async function getProducts({ activeOnly = false, categoryId = null } = {}) {
-  let rows = await localDb.getAll('products');
+  let rows = await localGetAll('products');
   if (activeOnly) rows = rows.filter(p => p.is_active !== false);
   if (categoryId) rows = rows.filter(p => p.category_id === categoryId);
   return rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
@@ -363,7 +379,7 @@ export async function deleteProduct(id) {
 
 // ---------- الزبائن ----------
 export async function getCustomers() {
-  const rows = await localDb.getAll('customers');
+  const rows = await localGetAll('customers');
   return rows.filter(c => !c.is_deleted).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
 }
 
@@ -615,7 +631,7 @@ export async function getSale(id) {
 }
 
 export async function getSales({ from, to, customerId } = {}) {
-  let rows = await localDb.getAll('sales');
+  let rows = await localGetAll('sales');
   rows = rows.filter(s => !s.is_deleted);
   if (from) rows = rows.filter(s => new Date(s.created_at) >= from);
   if (to) rows = rows.filter(s => new Date(s.created_at) <= to);
@@ -660,7 +676,7 @@ export async function updateSale(id, payload) {
   await writeRecord('sales', updated);
 
   // تصحيح حركة الصندوق: نحذف حركة الكاش القديمة للفاتورة ونضيف الجديدة إن وجدت
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'sale' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'sale' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   if (paidCash > 0) {
     await writeRecord('cashTransactions', {
@@ -676,7 +692,7 @@ export async function deleteSale(id) {
   const existing = await localDb.getById('sales', id);
   if (!existing) return;
   await writeRecord('sales', { ...existing, is_deleted: true, updated_at: nowISO() });
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'sale' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'sale' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('sale', id, 'soft_delete', {});
 }
@@ -704,7 +720,7 @@ export async function addPayment({ customerId, amount, method, referenceNumber, 
 }
 
 export async function getPayments({ from, to, customerId } = {}) {
-  let rows = await localDb.getAll('payments');
+  let rows = await localGetAll('payments');
   rows = rows.filter(p => !p.is_deleted);
   if (from) rows = rows.filter(p => new Date(p.created_at) >= from);
   if (to) rows = rows.filter(p => new Date(p.created_at) <= to);
@@ -716,7 +732,7 @@ export async function deletePayment(id) {
   const existing = await localDb.getById('payments', id);
   if (!existing) return;
   await writeRecord('payments', { ...existing, is_deleted: true });
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'payment' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'payment' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('payment', id, 'soft_delete', {});
 }
@@ -753,7 +769,7 @@ export async function addExpense({ amount, category, notes, createdAt }) {
 }
 
 export async function getExpenses({ from, to } = {}) {
-  let rows = await localDb.getAll('expenses');
+  let rows = await localGetAll('expenses');
   rows = rows.filter(e => !e.is_deleted);
   if (from) rows = rows.filter(e => new Date(e.created_at) >= from);
   if (to) rows = rows.filter(e => new Date(e.created_at) <= to);
@@ -764,7 +780,7 @@ export async function deleteExpense(id) {
   const existing = await localDb.getById('expenses', id);
   if (!existing) return;
   await writeRecord('expenses', { ...existing, is_deleted: true });
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'expense' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'expense' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('expense', id, 'soft_delete', {});
 }
@@ -772,7 +788,7 @@ export async function deleteExpense(id) {
 // ---------- الموردون ----------
 // نظام مستقل تمامًا عن الزبائن: الزبون = مبلغ مستحق للمحل، المورد = مبلغ يدين به المحل له. لا يشتركان بأي جدول أو رصيد.
 export async function getSuppliers() {
-  const rows = await localDb.getAll('suppliers');
+  const rows = await localGetAll('suppliers');
   return rows.filter(s => !s.is_deleted).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
 }
 
@@ -969,7 +985,7 @@ export async function getPurchase(id) {
 }
 
 export async function getPurchases({ from, to, supplierId } = {}) {
-  let rows = await localDb.getAll('purchases');
+  let rows = await localGetAll('purchases');
   rows = rows.filter(p => !p.is_deleted);
   if (from) rows = rows.filter(p => new Date(p.created_at) >= from);
   if (to) rows = rows.filter(p => new Date(p.created_at) <= to);
@@ -1015,7 +1031,7 @@ export async function updatePurchase(id, payload) {
   delete updated.items;
   await writeRecord('purchases', updated);
 
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   if (paidCash > 0) {
     await writeRecord('cashTransactions', {
@@ -1032,7 +1048,7 @@ export async function deletePurchase(id) {
   const existing = await localDb.getById('purchases', id);
   if (!existing) return;
   await writeRecord('purchases', { ...existing, is_deleted: true, updated_at: nowISO() });
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'purchase' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('purchase', id, 'soft_delete', {});
 }
@@ -1063,7 +1079,7 @@ export async function addSupplierPayment({ supplierId, purchaseId, amount, metho
 }
 
 export async function getSupplierPayments({ from, to, supplierId } = {}) {
-  let rows = await localDb.getAll('supplierPayments');
+  let rows = await localGetAll('supplierPayments');
   rows = rows.filter(p => !p.is_deleted);
   if (from) rows = rows.filter(p => new Date(p.created_at) >= from);
   if (to) rows = rows.filter(p => new Date(p.created_at) <= to);
@@ -1075,7 +1091,7 @@ export async function deleteSupplierPayment(id) {
   const existing = await localDb.getById('supplierPayments', id);
   if (!existing) return;
   await writeRecord('supplierPayments', { ...existing, is_deleted: true });
-  const oldCashTx = (await localDb.getAll('cashTransactions')).filter(t => t.reference_type === 'supplier_payment' && t.reference_id === id);
+  const oldCashTx = (await localGetAll('cashTransactions')).filter(t => t.reference_type === 'supplier_payment' && t.reference_id === id);
   for (const t of oldCashTx) await removeRecord('cashTransactions', t.id);
   await addAudit('supplier_payment', id, 'soft_delete', {});
 }
@@ -1159,7 +1175,7 @@ export async function getSmsTotalSent() {
 }
 
 export async function getSmsTemplates() {
-  const rows = await localDb.getAll('smsTemplates');
+  const rows = await localGetAll('smsTemplates');
   return rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
 }
 
@@ -1182,7 +1198,7 @@ export async function updateSmsTemplate(id, { name, body }) {
 }
 
 export async function deleteSmsTemplate(id) {
-  const schedules = await localDb.getAll('smsSchedules');
+  const schedules = await localGetAll('smsSchedules');
   if (schedules.some(s => s.template_id === id && s.status === 'pending')) {
     throw new Error('لا يمكن حذف قالب مستخدم بجدولة قائمة. أوقف أو احذف تلك الجدولة أولًا.');
   }
@@ -1190,7 +1206,7 @@ export async function deleteSmsTemplate(id) {
 }
 
 export async function getSmsSchedules() {
-  const rows = await localDb.getAll('smsSchedules');
+  const rows = await localGetAll('smsSchedules');
   return rows.sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
 }
 
@@ -1254,7 +1270,7 @@ export async function toggleCustomerSmsExclusion(customerId, excluded) {
 }
 
 export async function getSmsLog(limit = 200) {
-  const rows = await localDb.getAll('smsLog');
+  const rows = await localGetAll('smsLog');
   return rows.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit);
 }
 

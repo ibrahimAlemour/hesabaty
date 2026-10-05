@@ -1,12 +1,13 @@
 // التقارير: ملخص، أكثر المنتجات مبيعًا، رسم بياني للأرباح
 import * as db from './database.js';
 import { getCurrentUser, canViewProfit } from './auth.js';
-import { formatMoney, formatNumber, dateRangeFor, startOfDay, endOfDay, escapeHtml } from './utils.js';
-import { emptyState } from './ui.js';
+import { formatMoney, formatNumber, fromCents, dateRangeFor, startOfDay, endOfDay, escapeHtml } from './utils.js';
+import { emptyState, toastSuccess } from './ui.js';
 
 let currentPreset = 'today';
 let customFrom = null, customTo = null;
 let chartInstance = null;
+let lastReportData = null;
 
 const PRESETS = [
   ['today', 'اليوم'], ['yesterday', 'أمس'], ['last7', 'آخر 7 أيام'],
@@ -30,10 +31,14 @@ async function renderForPreset(container, preset) {
     db.getReportSummary(range), db.getTopProducts({ ...range, limit: 8 }), db.getProfitByDay(range), getCurrentUser()
   ]);
   const showProfit = canViewProfit(user);
+  lastReportData = { range, summary, topProducts, showProfit };
 
   container.innerHTML = `
     <div class="tabs">
       ${PRESETS.map(([k, l]) => `<button class="tab-btn ${preset === k ? 'active' : ''}" data-preset="${k}">${l}</button>`).join('')}
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+      <button class="btn btn-secondary" id="export-csv-btn" style="padding:6px 12px;font-size:13px;">⬇️ تصدير CSV</button>
     </div>
     ${preset === 'custom' ? `
     <div class="card" style="display:flex;gap:8px;align-items:end;">
@@ -65,6 +70,7 @@ async function renderForPreset(container, preset) {
     </div>
   `;
 
+  container.querySelector('#export-csv-btn').onclick = () => exportReportCsv(lastReportData);
   container.querySelectorAll('[data-preset]').forEach(btn => btn.onclick = () => renderForPreset(container, btn.dataset.preset));
   const applyBtn = container.querySelector('#apply-custom');
   if (applyBtn) applyBtn.onclick = () => {
@@ -123,4 +129,54 @@ async function drawChart(container, profitByDay) {
   } catch (err) {
     canvas.replaceWith(document.createTextNode('تعذر تحميل الرسم البياني (بدون إنترنت لأول مرة)'));
   }
+}
+
+function csvField(value) {
+  const s = value == null ? '' : String(value);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+function csvRow(fields) { return fields.map(csvField).join(',') + '\r\n'; }
+
+function exportReportCsv(data) {
+  if (!data) return;
+  const { range, summary, topProducts, showProfit } = data;
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  let csv = '﻿'; // BOM لضمان ظهور النصوص العربية بشكل صحيح عند فتح الملف ببرامج مثل Excel
+
+  csv += csvRow([`تقرير حساباتي من ${fmt(range.from)} إلى ${fmt(range.to)}`]);
+  csv += '\r\n';
+
+  csv += csvRow(['الملخص']);
+  csv += csvRow(['إجمالي المبيعات', fromCents(summary.totalSales)]);
+  if (showProfit) csv += csvRow(['صافي الربح', fromCents(summary.netProfit)]);
+  csv += csvRow(['النقد', fromCents(summary.totalCash)]);
+  csv += csvRow(['التحويلات', fromCents(summary.totalTransfer)]);
+  csv += csvRow(['مبيعات آجلة', fromCents(summary.totalDebtNew)]);
+  csv += csvRow(['محصّل من الديون', fromCents(summary.debtCollected)]);
+  if (showProfit) {
+    csv += csvRow(['إجمالي التكلفة', fromCents(summary.totalCost)]);
+    csv += csvRow(['المصروفات', fromCents(summary.totalExpenses)]);
+  }
+  csv += csvRow(['عدد الفواتير', summary.invoiceCount]);
+  csv += csvRow(['متوسط الفاتورة', fromCents(summary.avgSale)]);
+  csv += '\r\n';
+
+  csv += csvRow(['أكثر المنتجات مبيعًا']);
+  const header = ['المنتج', 'الكمية', 'الوحدة', 'المبيعات'];
+  if (showProfit) header.push('الربح');
+  csv += csvRow(header);
+  for (const p of topProducts) {
+    const row = [p.name, formatNumber(p.quantity), p.unit, fromCents(p.sales)];
+    if (showProfit) row.push(fromCents(p.profit));
+    csv += csvRow(row);
+  }
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `hesabaty-report-${fmt(range.from)}-to-${fmt(range.to)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toastSuccess('تم تصدير التقرير');
 }

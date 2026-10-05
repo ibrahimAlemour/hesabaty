@@ -246,24 +246,72 @@ const SYNC_ICON_TITLES = {
   session_invalid: '⚠️ انتهت صلاحية جلسة الدخول - سجّل الخروج والدخول من جديد من الإعدادات لضمان رفع بياناتك'
 };
 
+// نفس النصوص أعلاه لكن بصياغة أوضح لصاحب المحل (تُستخدم بشاشة التفاصيل عند الضغط على الأيقونة -
+// التوضيح مهم خصوصًا لحالة "غير متصل" ليعرف أنها طبيعية ومتوقعة بتطبيق يعمل بدون إنترنت، وليست عطلًا)
+const SYNC_DETAIL = {
+  offline: { icon: '📴', label: 'غير متصل بالإنترنت', desc: 'لا بأس، هذا طبيعي. بياناتك محفوظة بأمان على جهازك وسترفع تلقائيًا للخادم فور توفر الإنترنت.', danger: false },
+  pending: { icon: '⏳', label: 'بانتظار الرفع', desc: 'هناك عمليات لم تُرفع للخادم بعد، وسيتم رفعها تلقائيًا خلال لحظات.', danger: false },
+  syncing: { icon: '🔄', label: 'جاري المزامنة...', desc: 'يتم الآن رفع بياناتك إلى الخادم.', danger: false },
+  synced: { icon: '✅', label: 'متصل ومتزامن', desc: 'كل بياناتك محفوظة على الخادم بنجاح.', danger: false },
+  session_invalid: { icon: '⚠️', label: 'انتهت صلاحية الجلسة', desc: 'يرجى تسجيل الدخول من جديد لضمان رفع بياناتك ومزامنتها.', danger: true }
+};
+
+let lastSyncStatus = 'synced';
+let lastPendingCount = 0;
+
 async function applySyncIconStatus(status) {
   const btn = document.getElementById('sync-status-btn');
   if (!btn) return;
+  lastSyncStatus = status;
   btn.classList.remove('sync-offline', 'sync-pending', 'sync-syncing', 'sync-synced', 'sync-session_invalid');
   btn.classList.add(`sync-${status}`);
 
   // نعرض عدد عمليات البيع غير المتزامنة تحديدًا (لا العدد الخام لعناصر طابور المزامنة، لأن كل عملية بيع
   // واحدة تُسجَّل داخليًا كعدة عناصر منفصلة: الفاتورة نفسها + أصنافها + حركة الصندوق + سجل التدقيق)
   const pending = (await getPendingIds('sales')).size;
+  lastPendingCount = pending;
   const badge = document.getElementById('sync-pending-badge');
   if (badge) {
     if (pending > 0) { badge.textContent = pending > 99 ? '99+' : String(pending); badge.style.display = ''; }
     else badge.style.display = 'none';
+    badge.classList.toggle('danger', status === 'session_invalid');
   }
   const suffix = pending > 0 ? ` (${pending} عملية بيع بانتظار الرفع)` : '';
   btn.title = (SYNC_ICON_TITLES[status] || '') + suffix;
 
   handleSessionModal(status);
+}
+
+// شيت توضيحي يُفتح بالضغط على أيقونة حالة المزامنة - مهم على الجوال لأن title (tooltip) لا يظهر
+// بالضغط، فبدون هذا الشيت يرى المستخدم تغيّر لون الأيقونة بدون أي تفسير لما يعنيه
+function openSyncDetailSheet() {
+  const status = lastSyncStatus;
+  const info = SYNC_DETAIL[status] || SYNC_DETAIL.synced;
+  const pendingLine = lastPendingCount > 0
+    ? `<p style="font-size:13px;color:var(--text-muted);margin-top:-4px;">📦 ${lastPendingCount} عملية بيع بانتظار الرفع</p>`
+    : '';
+  const overlay = openSheet(`
+    <div class="confirm-box">
+      <div class="icon-circle" style="${info.danger ? '' : 'background:var(--primary-light);color:var(--primary-dark);'}font-size:22px;">${info.icon}</div>
+      <h3 style="margin:0 0 4px;font-size:16.5px;font-weight:800;">${info.label}</h3>
+      <p>${info.desc}</p>
+      ${pendingLine}
+      <div class="confirm-actions">
+        ${status === 'session_invalid'
+          ? `<button class="btn btn-secondary" data-act="close">إغلاق</button><button class="btn btn-primary" data-act="login">تسجيل الدخول</button>`
+          : `<button class="btn btn-primary" data-act="close" style="width:100%;">حسنًا</button>`}
+      </div>
+    </div>
+  `);
+  overlay.querySelector('[data-act="close"]').onclick = () => closeSheet();
+  const loginBtn = overlay.querySelector('[data-act="login"]');
+  if (loginBtn) {
+    loginBtn.onclick = async () => {
+      closeSheet();
+      await signOut();
+      window.location.reload();
+    };
+  }
 }
 
 // نميّز صراحة بين "بدون إنترنت" (status=offline، طبيعي ومتوقع، لا نعرض شيئًا) و"جلسة دخول منتهية فعليًا"
@@ -313,6 +361,7 @@ async function initSyncIndicator() {
   const btn = document.getElementById('sync-status-btn');
   if (!btn) return;
   if (settings.backendMode !== 'supabase') { btn.style.display = 'none'; return; }
+  btn.onclick = openSyncDetailSheet;
   applySyncIconStatus(await getSyncStatus());
   onSyncStatusChange(applySyncIconStatus);
 }

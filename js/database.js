@@ -39,6 +39,8 @@ const DEFAULT_SETTINGS = {
   // currentShopId)، حتى يمكن اكتشاف "تبديل محل" حتى بعد دورة خروج/دخول كاملة على نفس الجهاز (راجع auth.js)
   lastKnownShopId: null,
   shopStatus: 'active', // active | suspended (يُحدَّث بعد كل تسجيل دخول عبر سوبابيس)
+  // محلي بحت (لا يُزامَن لسوبابيس أبدًا) - هل رأى المستخدم شاشة الترحيب بأول دخول على هذا الجهاز؟
+  welcomeSeen: false,
   updated_at: nowISO()
 };
 

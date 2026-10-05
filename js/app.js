@@ -27,6 +27,7 @@ import {
   renderCashierSupplierList, renderCashierSupplierDetail, renderCashierDebts
 } from './cashier.js';
 import { renderGlobalSearch } from './search.js';
+import { renderWelcome } from './welcome.js';
 import './pwa-install.js';
 
 const appContent = document.getElementById('app-content');
@@ -196,6 +197,17 @@ async function router() {
   document.getElementById('app-shell').style.display = '';
   document.getElementById('login-root').innerHTML = '';
   document.getElementById('setup-root').innerHTML = '';
+
+  // شاشة ترحيب تظهر مرة واحدة فقط بأول دخول لصاحب المحل على هذا الجهاز (محلي بحت، راجع welcomeSeen
+  // بـdatabase.js) - تسبق أي توجيه آخر، ولا تظهر للكاشير إطلاقًا (ليست صاحبة القرار بإعداد المحل)
+  const currentUserForWelcome = await getCurrentUser();
+  if (settings.backendMode === 'supabase' && !settings.welcomeSeen && !(currentUserForWelcome && currentUserForWelcome.role === 'cashier')) {
+    headerTitle.textContent = 'حساباتي';
+    backBtn.style.display = 'none';
+    await renderWelcome(appContent, () => router());
+    window.scrollTo(0, 0);
+    return;
+  }
 
   // واجهة كاشير مبسّطة ومؤقتة (راجع js/cashier.js): نحصر المسارات المسموحة ونبني شريطًا سفليًا مختصرًا فقط لهذا الدور،
   // دون أي تأثير على واجهة المالك (نفس المسارات والشريط الأصليين تمامًا لأي دور آخر)

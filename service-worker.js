@@ -50,16 +50,37 @@ const APP_SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
+  // نخزّن كل ملف على حدة بدل cache.addAll() (التي تفشل بالكامل لو فشل ملف واحد فقط) - على اتصال بطيء
+  // جدًا أو متقطع يكفي فشل تحميل ملف واحد لإسقاط التفعيل كله ويبقى المستخدم عالقًا بلا أي نسخة محفوظة
+  // تعمل. هنا نحاول الجميع وتابع العمل بما نجح تخزينه فقط - الباقي يُجلب لاحقًا عند أول طلب فعلي له
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const results = await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed) console.warn(`[service-worker] تعذّر تخزين ${failed} من ${APP_SHELL.length} ملفًا مسبقًا`);
+    }).then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys.filter((k) => k !== CACHE_NAME && k !== RUNTIME_CACHE).map((k) => caches.delete(k))
-    )).then(() => self.clients.claim())
+    (async () => {
+      const keys = await caches.keys();
+      // قبل حذف نسخة التخزين القديمة: ننقل لها أي ملف فشل تخزينه بالنسخة الجديدة أثناء install (اتصال
+      // سيئ جدًا كما حصل فعليًا) إن كان محفوظًا بنجاح بالنسخة القديمة - حتى لا يفقد المستخدم كليًا أي ملف
+      // كان يعمل بنجاح قبل التحديث
+      const oldKey = keys.find((k) => k !== CACHE_NAME && k.startsWith('hesabaty-cache-'));
+      if (oldKey) {
+        const [newCache, oldCache] = await Promise.all([caches.open(CACHE_NAME), caches.open(oldKey)]);
+        for (const url of APP_SHELL) {
+          if (await newCache.match(url)) continue;
+          const fromOld = await oldCache.match(url);
+          if (fromOld) await newCache.put(url, fromOld);
+        }
+      }
+      await Promise.all(keys.filter((k) => k !== CACHE_NAME && k !== RUNTIME_CACHE).map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })()
   );
 });
 

@@ -58,7 +58,9 @@ hesabaty/
 ├── assets/icons/                أيقونات PWA (تم توليدها محليًا)
 ├── supabase/
 │   ├── schema.sql                السكيما الأصلية (محل واحد لكل قاعدة بيانات)
-│   └── schema_saas.sql           ترقية SaaS: shops/subscriptions/payments + عزل RLS متعدد المحلات (نفّذه بعد schema.sql)
+│   ├── schema_saas.sql           ترقية SaaS: shops/subscriptions/payments + عزل RLS متعدد المحلات (نفّذه بعد schema.sql)
+│   └── RLS_REFERENCE.md          مرجع موحّد للحالة الفعلية النهائية لكل سياسة RLS بكل جدول (بعد تطبيق الملفين أعلاه)
+├── tests/                       حزمة اختبارات آلية (Playwright) - `npm test` (راجع tests/README.md)
 └── README.md
 ```
 

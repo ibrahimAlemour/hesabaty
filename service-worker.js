@@ -2,22 +2,23 @@
 const CACHE_NAME = 'hesabaty-cache-v18';
 const RUNTIME_CACHE = 'hesabaty-runtime-v18';
 
+// الملفات "الحرجة" التي يجب أن ينجح تخزينها لتفعيل نسخة جديدة من Service Worker: بدونها التطبيق لا
+// يعمل إطلاقًا حتى بالوضع الأساسي. باقي الشاشات (sales.js, reports.js...) غير حرجة لأنها تُجلب وتُخزَّن
+// تلقائيًا بأول طلب فعلي لها عبر معالج fetch أدناه (Network-first + تخزين تلقائي عند النجاح)
+const CRITICAL_SHELL = [
+  './', './index.html', './manifest.json', './css/style.css',
+  './js/app.js', './js/database.js', './js/db-indexeddb.js', './js/db-supabase.js',
+  './js/sync.js', './js/auth.js', './js/ui.js', './js/utils.js'
+];
+
 const APP_SHELL = [
-  './',
-  './index.html',
-  './manifest.json',
-  './css/style.css',
+  ...CRITICAL_SHELL,
   './css/responsive.css',
-  './js/app.js',
   './js/attachments.js',
-  './js/auth.js',
   './js/cash.js',
   './js/cashier.js',
   './js/customers.js',
   './js/dashboard.js',
-  './js/database.js',
-  './js/db-indexeddb.js',
-  './js/db-supabase.js',
   './js/debts.js',
   './js/expenses.js',
   './js/invoice.js',
@@ -32,12 +33,9 @@ const APP_SHELL = [
   './js/settings.js',
   './js/seed.js',
   './js/setup.js',
-  './js/sync.js',
   './js/suppliers.js',
   './js/purchases.js',
   './js/transfers.js',
-  './js/ui.js',
-  './js/utils.js',
   './js/welcome.js',
   './js/saas-config.js',
   './js/pwa-install.js',
@@ -51,14 +49,25 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   // نخزّن كل ملف على حدة بدل cache.addAll() (التي تفشل بالكامل لو فشل ملف واحد فقط) - على اتصال بطيء
-  // جدًا أو متقطع يكفي فشل تحميل ملف واحد لإسقاط التفعيل كله ويبقى المستخدم عالقًا بلا أي نسخة محفوظة
-  // تعمل. هنا نحاول الجميع وتابع العمل بما نجح تخزينه فقط - الباقي يُجلب لاحقًا عند أول طلب فعلي له
+  // جدًا أو متقطع يكفي فشل تحميل ملف واحد لإسقاط التفعيل كله ويبقى المستخدم عالقًا بلا أي نسخة محفوظة تعمل.
+  //
+  // مهم جدًا: skipWaiting() (الذي يفرض استبدال النسخة القديمة الشغّالة فورًا) لا يُستدعى إلا إذا نجح تخزين
+  // كل الملفات "الحرجة" (CRITICAL_SHELL). لو فشل أي منها (اتصال سيئ جدًا وقت التحديث تحديدًا، كما حصل فعليًا)
+  // تبقى النسخة القديمة الكاملة الشغّالة مسيطرة دون أي تغيير، وسيُعاد تلقائيًا محاولة التثبيت بزيارة لاحقة
+  // بدل استبدال نسخة كاملة تعمل بنسخة جديدة قد تكون ناقصة وقت اتصال سيئ تحديدًا
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
       const results = await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
-      const failed = results.filter((r) => r.status === 'rejected').length;
-      if (failed) console.warn(`[service-worker] تعذّر تخزين ${failed} من ${APP_SHELL.length} ملفًا مسبقًا`);
-    }).then(() => self.skipWaiting())
+      const failedUrls = APP_SHELL.filter((_, i) => results[i].status === 'rejected');
+      if (failedUrls.length) console.warn(`[service-worker] تعذّر تخزين ${failedUrls.length} من ${APP_SHELL.length} ملفًا مسبقًا:`, failedUrls);
+
+      const criticalFailed = failedUrls.some((url) => CRITICAL_SHELL.includes(url));
+      if (criticalFailed) {
+        console.warn('[service-worker] فشل تخزين ملفات حرجة - لن تُفعَّل هذه النسخة؛ تبقى النسخة الحالية الشغّالة كما هي');
+        return; // بدون skipWaiting(): هذه النسخة تبقى "بانتظار" حتى تُثبَّت بنجاح لاحقًا، ولا تُفعَّل بحالة ناقصة
+      }
+      self.skipWaiting();
+    })
   );
 });
 

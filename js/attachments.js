@@ -9,6 +9,36 @@ import { toastError, toastSuccess, confirmDialog } from './ui.js';
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 ميجابايت لكل ملف - كافٍ لصورة فاتورة بجودة جيدة بدون إبطاء الرفع
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
+// أنواع يمكن ضغطها بالمتصفح عبر canvas (HEIC/HEIF غير مدعوم بأغلب المتصفحات لفك ترميزه هنا، فيُرفع كما هو)
+const COMPRESSIBLE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const COMPRESS_MIN_SIZE = 300 * 1024; // ملف أصغر من هذا أصلًا لا يستفيد من ضغط إضافي
+const COMPRESS_MAX_DIMENSION = 1600; // كافٍ جدًا لقراءة تفاصيل فاتورة بوضوح، ويقلّص صور الكاميرا الحديثة (12+ ميجابكسل) بشكل كبير
+const COMPRESS_QUALITY = 0.75;
+
+// يضغط صور الفواتير قبل رفعها (أبطأ اتصال إنترنت لدى كثير من المستخدمين + تكلفة تخزين Supabase) - فشل الضغط
+// لأي سبب (متصفح قديم، صورة تالفة...) لا يوقف الرفع، فقط يرفع الملف الأصلي كما هو بدلًا من ذلك
+export async function compressImageIfNeeded(file) {
+  if (!COMPRESSIBLE_TYPES.includes(file.type) || file.size <= COMPRESS_MIN_SIZE) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    let { width, height } = bitmap;
+    if (width > COMPRESS_MAX_DIMENSION || height > COMPRESS_MAX_DIMENSION) {
+      const scale = COMPRESS_MAX_DIMENSION / Math.max(width, height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', COMPRESS_QUALITY));
+    if (!blob || blob.size >= file.size) return file; // الضغط لم يُفِد (نادر) - نرفع الأصل كما هو
+    const newName = file.name.replace(/\.(png|webp|jpe?g)$/i, '') + '.jpg';
+    return new File([blob], newName, { type: 'image/jpeg' });
+  } catch (e) {
+    console.error('تعذر ضغط الصورة، سيتم رفعها كما هي', e);
+    return file;
+  }
+}
 
 function isAvailable() {
   return navigator.onLine && !!remoteDb.getClient();
@@ -24,10 +54,14 @@ function safeFileName(name) {
 
 export async function uploadAttachment(entityType, entityId, file) {
   if (!isAvailable()) throw new Error('المرفقات تحتاج اتصالًا بالإنترنت. حاول مرة أخرى بعد التأكد من الاتصال.');
-  if (file.size > MAX_FILE_SIZE) throw new Error('حجم الملف كبير جدًا (الحد الأقصى 8 ميجابايت)');
   if (ALLOWED_TYPES.length && file.type && !ALLOWED_TYPES.includes(file.type)) {
     throw new Error('نوع الملف غير مدعوم. يُسمح فقط بالصور أو ملفات PDF');
   }
+
+  // الضغط قبل فحص الحجم الأقصى عمدًا: صور الكاميرا الحديثة قد تتجاوز 8 ميجابايت أصلًا، والضغط
+  // غالبًا ما يُنزلها تحت الحد المسموح بدل رفض رفعها مباشرة
+  file = await compressImageIfNeeded(file);
+  if (file.size > MAX_FILE_SIZE) throw new Error('حجم الملف كبير جدًا (الحد الأقصى 8 ميجابايت)');
 
   const s = await getSettings();
   if (!s.currentShopId) throw new Error('لم يتم تحديد المحل بعد');

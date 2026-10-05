@@ -1,0 +1,11 @@
+{
+  "name": "hesabaty",
+  "private": true,
+  "description": "نظام كاشير وإدارة محل - بدون أي عملية بناء (build)؛ JS/HTML/CSS عادي يُخدَّم مباشرة. ملف package.json هذا فقط لتشغيل حزمة الاختبارات الآلية.",
+  "scripts": {
+    "test": "node tests/run-all.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

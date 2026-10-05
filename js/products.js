@@ -7,6 +7,9 @@ import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDia
 let currentCategory = 'all';
 let currentQuery = '';
 
+// يُستخدم من شاشة البحث العام (search.js) ليفتح قائمة المنتجات مع تصفية جاهزة باسم المنتج المختار
+export function setProductSearchQuery(q) { currentQuery = q || ''; currentCategory = 'all'; }
+
 export async function renderProductList(container) {
   container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
   const [products, categories, user] = await Promise.all([db.getProducts(), db.getCategories(), getCurrentUser()]);

@@ -26,6 +26,7 @@ import {
   renderCashierHome, renderCashierCustomerList, renderCashierCustomerDetail,
   renderCashierSupplierList, renderCashierSupplierDetail, renderCashierDebts
 } from './cashier.js';
+import { renderGlobalSearch } from './search.js';
 import './pwa-install.js';
 
 const appContent = document.getElementById('app-content');
@@ -100,7 +101,8 @@ const ROUTES = [
   { pattern: /^#\/reports$/, title: 'التقارير', render: () => renderReports(appContent) },
   { pattern: /^#\/settings$/, title: 'الإعدادات', showBack: true, render: () => renderSettings(appContent) },
   { pattern: /^#\/invoice\/([\w-]+)$/, title: 'الفاتورة', showBack: true, render: (m) => renderInvoice(appContent, m[1]) },
-  { pattern: /^#\/more$/, title: 'المزيد', render: (m, isCashier) => renderMore(appContent, isCashier) }
+  { pattern: /^#\/more$/, title: 'المزيد', render: (m, isCashier) => renderMore(appContent, isCashier) },
+  { pattern: /^#\/search$/, title: 'بحث شامل', showBack: true, render: () => renderGlobalSearch(appContent) }
 ];
 
 async function renderSuspendedScreen(container) {
@@ -416,5 +418,13 @@ function buildNav(isCashier) {
   if (sidebar) {
     sidebar.innerHTML = [...navItems.filter(i => !i.isFab), ...moreItems.map(i => ({ path: i.path, label: i.label, icon: null, emoji: i.icon }))]
       .map(item => `<a href="${item.path}">${item.icon ? iconSvg(item.icon) : `<span style="width:19px;text-align:center;">${item.emoji}</span>`}<span>${item.label}</span></a>`).join('');
+  }
+
+  // البحث الشامل متاح فقط لصاحب المحل (لا للكاشير) حتى لا يطّلع الكاشير عبر هذه الشاشة الجديدة على بيانات
+  // مقيّدة عنه أصلًا بباقي الشاشات (أرباح، فواتير شراء...الخ)
+  const searchBtn = document.getElementById('global-search-btn');
+  if (searchBtn) {
+    searchBtn.style.display = isCashier ? 'none' : '';
+    searchBtn.onclick = () => { window.location.hash = '#/search'; };
   }
 }

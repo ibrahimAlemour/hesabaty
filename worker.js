@@ -514,6 +514,15 @@ async function processDueSmsSchedules(env) {
 
   for (const schedule of due) {
     try {
+      // إصلاح أمني/مالي حرج: الحالة السابقة كانت تُحدَّث لـ"تم الإرسال" فقط بعد انتهاء إرسال كل الرسائل بنجاح
+      // (حلقة تنتظر كل عملية بالتتابع). أي خطأ جزئي أثناء الحلقة (رقم هاتف تالف، خطأ شبكي عابر، تجاوز حد وقت
+      // التنفيذ...) كان يُسقط الاستثناء فيبقى status='pending' دون تغيير، فتلتقط نفس الجدولة مرة أخرى بالدورة
+      // التالية لـcron (كل 15 دقيقة) وتُعيد إرسال الرسالة لكل الزبائن من جديد - وتتكرر كل 15 دقيقة للأبد ما لم
+      // يُلاحَظ ويُوقَف يدويًا. هذا تسبّب فعليًا باستهلاك باقة SMS كاملة برسائل مكرّرة لنفس الأسماء.
+      // الإصلاح: نحجز الجدولة فورًا (قبل إرسال أي رسالة) بقفل تفاؤلي (status=eq.pending بالشرط)، فلا تُعاد
+      // معالجتها إطلاقًا مهما فشل لاحقًا أثناء الإرسال الفعلي.
+      const claimed = await claimSchedule(schedule, svcHeaders);
+      if (!claimed) continue; // عولجت فعلاً باستدعاء آخر بين الفحص والحجز
       await processOneSchedule(schedule, svcHeaders, env);
     } catch (e) {
       console.error('فشلت معالجة جدولة SMS', schedule.id, e);
@@ -521,11 +530,30 @@ async function processDueSmsSchedules(env) {
   }
 }
 
+// يحجز الجدولة فورًا قبل إرسال أي رسالة فعليًا، بشرط أنها لا تزال status=pending (قفل تفاؤلي يمنع معالجتها
+// مرتين). "مرة واحدة" تُعلَّم completed فورًا؛ "متكررة" يُقدَّم موعدها القادم فورًا - في كلتا الحالتين لا رجوع
+// لحالة pending بعدها، فلا يمكن لأي استدعاء لاحق لـcron أن يلتقطها مرة أخرى بغضّ النظر عمّا يحصل أثناء الإرسال
+async function claimSchedule(schedule, svcHeaders) {
+  const patch = schedule.recurring === 'once' ? { status: 'completed' } : { scheduled_at: nextRecurrence(schedule) };
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/sms_schedules?id=eq.${schedule.id}&status=eq.pending`, {
+    method: 'PATCH', headers: { ...svcHeaders, Prefer: 'return=representation' }, body: JSON.stringify(patch)
+  });
+  const updated = await res.json();
+  return Array.isArray(updated) && updated.length > 0;
+}
+
+function nextRecurrence(schedule) {
+  const days = schedule.recurring === 'weekly' ? 7 : 30;
+  const next = new Date(schedule.scheduled_at);
+  next.setDate(next.getDate() + days);
+  return next.toISOString();
+}
+
 async function processOneSchedule(schedule, svcHeaders, env) {
   const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/sms_templates?id=eq.${schedule.template_id}&select=*`, { headers: svcHeaders });
   const templates = await tplRes.json();
   const template = Array.isArray(templates) ? templates[0] : null;
-  if (!template) { await markScheduleDone(schedule, svcHeaders); return; }
+  if (!template) return; // الجدولة محجوزة فعلاً (claimSchedule) فلا حاجة لتحديث حالتها هنا
 
   const shopRes = await fetch(`${SUPABASE_URL}/rest/v1/shops?id=eq.${schedule.shop_id}&select=name`, { headers: svcHeaders });
   const shops = await shopRes.json();
@@ -537,8 +565,14 @@ async function processOneSchedule(schedule, svcHeaders, env) {
   const customers = await custRes.json();
   const excludedIds = new Set(Array.isArray(schedule.excluded_customer_ids) ? schedule.excluded_customer_ids : []);
 
+  // حاجز حماية أخير (دفاع بعمق) ضد أي إرسال مكرّر فعلي: نتجاهل أي زبون أُرسلت له رسالة بنجاح بهذه الجدولة
+  // تحديدًا من قبل - نادر الحدوث بعد claimSchedule أعلاه، لكنه يمنع مضاعفة استهلاك الباقة مهما كان السبب
+  const sentRes = await fetch(`${SUPABASE_URL}/rest/v1/sms_log?schedule_id=eq.${schedule.id}&status=eq.sent&select=customer_id`, { headers: svcHeaders });
+  const sentRows = await sentRes.json();
+  const alreadySentIds = new Set((Array.isArray(sentRows) ? sentRows : []).map(r => r.customer_id));
+
   for (const customer of (Array.isArray(customers) ? customers : [])) {
-    if (excludedIds.has(customer.id)) continue; // استثناء خاص بهذه الجدولة فقط
+    if (excludedIds.has(customer.id) || alreadySentIds.has(customer.id)) continue;
     const balance = await getCustomerBalanceRemote(customer.id, svcHeaders);
     if (balance <= 0) continue; // ما نبعت تذكير لزبون ما عليه دين حاليًا
 
@@ -571,8 +605,6 @@ async function processOneSchedule(schedule, svcHeaders, env) {
       });
     }
   }
-
-  await markScheduleDone(schedule, svcHeaders);
 }
 
 async function getCustomerBalanceRemote(customerId, svcHeaders) {
@@ -623,21 +655,6 @@ function countSmsSegments(text) {
   if (!len) return 0;
   const isArabic = /[؀-ۿݐ-ݿ]/.test(text);
   return Math.ceil(len / (isArabic ? 70 : 160));
-}
-
-async function markScheduleDone(schedule, svcHeaders) {
-  if (schedule.recurring === 'once') {
-    await fetch(`${SUPABASE_URL}/rest/v1/sms_schedules?id=eq.${schedule.id}`, {
-      method: 'PATCH', headers: svcHeaders, body: JSON.stringify({ status: 'completed' })
-    });
-  } else {
-    const days = schedule.recurring === 'weekly' ? 7 : 30;
-    const next = new Date(schedule.scheduled_at);
-    next.setDate(next.getDate() + days);
-    await fetch(`${SUPABASE_URL}/rest/v1/sms_schedules?id=eq.${schedule.id}`, {
-      method: 'PATCH', headers: svcHeaders, body: JSON.stringify({ scheduled_at: next.toISOString() })
-    });
-  }
 }
 
 // ---------- التكامل مع مزوّد TweetSMS (tweetsms.ps) - واجهة JSON الرسمية ----------

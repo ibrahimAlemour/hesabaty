@@ -562,7 +562,7 @@ async function processOneSchedule(schedule, svcHeaders, env) {
   let custQuery = `shop_id=eq.${schedule.shop_id}&is_deleted=eq.false&sms_excluded=eq.false`;
   if (schedule.target !== 'all') custQuery += `&payment_cycle=eq.${schedule.target}`;
   const custRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?${custQuery}&select=*`, { headers: svcHeaders });
-  const customers = await custRes.json();
+  const allCustomers = await custRes.json();
   const excludedIds = new Set(Array.isArray(schedule.excluded_customer_ids) ? schedule.excluded_customer_ids : []);
 
   // حاجز حماية أخير (دفاع بعمق) ضد أي إرسال مكرّر فعلي: نتجاهل أي زبون أُرسلت له رسالة بنجاح بهذه الجدولة
@@ -571,12 +571,25 @@ async function processOneSchedule(schedule, svcHeaders, env) {
   const sentRows = await sentRes.json();
   const alreadySentIds = new Set((Array.isArray(sentRows) ? sentRows : []).map(r => r.customer_id));
 
-  for (const customer of (Array.isArray(customers) ? customers : [])) {
-    if (excludedIds.has(customer.id) || alreadySentIds.has(customer.id)) continue;
-    const balance = await getCustomerBalanceRemote(customer.id, svcHeaders);
+  const customers = (Array.isArray(allCustomers) ? allCustomers : [])
+    .filter(c => !excludedIds.has(c.id) && !alreadySentIds.has(c.id));
+  if (!customers.length) return;
+
+  // إصلاح أداء/موثوقية مهم: كان يُحسب رصيد كل زبون وموعد استحقاقه باستعلامين منفصلين لكل زبون على حدة
+  // (حتى 4 طلبات شبكة إضافية × عدد الزبائن المستهدفين). بحسابات Cloudflare المجانية (حد 50 طلبًا بالتنفيذ
+  // الواحد) كانت جدولة لـ15 زبونًا فقط تحتاج ~70 طلبًا فتفشل حتميًا بالمنتصف - والآن بعد claimSchedule لا
+  // تُعاد محاولتها فتُرسَل لجزء من الزبائن فقط بصمت دون أي تنبيه. نجلب كل البيانات اللازمة لكل الزبائن
+  // باستعلامين اثنين فقط إجمالًا (بغض النظر عن عددهم)، ونُدرج سجلات الإرسال دفعة واحدة بالنهاية كذلك
+  const { balances, dueDates } = await fetchBalancesAndDueDates(customers, svcHeaders);
+
+  const logEntries = [];
+  let totalSegments = 0;
+
+  for (const customer of customers) {
+    const balance = balances.get(customer.id) || 0;
     if (balance <= 0) continue; // ما نبعت تذكير لزبون ما عليه دين حاليًا
 
-    const dueDate = await getExpectedDueDateRemote(customer, balance, svcHeaders);
+    const dueDate = dueDates.get(customer.id) || null;
     const message = renderSmsTemplateRemote(template.body, { customerName: customer.name, balanceCents: balance, dueDate, shopName });
 
     let result;
@@ -587,49 +600,65 @@ async function processOneSchedule(schedule, svcHeaders, env) {
     }
 
     const segments = countSmsSegments(message);
-    await fetch(`${SUPABASE_URL}/rest/v1/sms_log`, {
-      method: 'POST', headers: svcHeaders,
-      body: JSON.stringify({
-        shop_id: schedule.shop_id, schedule_id: schedule.id, customer_id: customer.id,
-        customer_name: customer.name, phone: customer.phone || '', message, segments,
-        scheduled_at: schedule.scheduled_at, sent_at: new Date().toISOString(),
-        status: result.success ? 'sent' : 'failed', error: result.error || null
-      })
+    if (result.success) totalSegments += segments;
+    logEntries.push({
+      shop_id: schedule.shop_id, schedule_id: schedule.id, customer_id: customer.id,
+      customer_name: customer.name, phone: customer.phone || '', message, segments,
+      scheduled_at: schedule.scheduled_at, sent_at: new Date().toISOString(),
+      status: result.success ? 'sent' : 'failed', error: result.error || null
     });
+  }
 
-    // نحدّث عدّاد استهلاك الرسائل فقط عند نجاح الإرسال فعليًا (لا نحسب المحاولات الفاشلة)
-    if (result.success) {
-      await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_shop_sms_segments`, {
-        method: 'POST', headers: svcHeaders,
-        body: JSON.stringify({ p_shop_id: schedule.shop_id, p_amount: segments })
-      });
-    }
+  if (!logEntries.length) return;
+
+  // إدراج دفعة واحدة لكل سجلات الإرسال (PostgREST يقبل مصفوفة بطلب POST واحد) بدل طلب منفصل لكل زبون
+  await fetch(`${SUPABASE_URL}/rest/v1/sms_log`, { method: 'POST', headers: svcHeaders, body: JSON.stringify(logEntries) });
+
+  // نحدّث عدّاد استهلاك الرسائل مرة واحدة بإجمالي كل الرسائل الناجحة فعليًا (لا نحسب المحاولات الفاشلة)
+  if (totalSegments > 0) {
+    await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_shop_sms_segments`, {
+      method: 'POST', headers: svcHeaders, body: JSON.stringify({ p_shop_id: schedule.shop_id, p_amount: totalSegments })
+    });
   }
 }
 
-async function getCustomerBalanceRemote(customerId, svcHeaders) {
-  const salesRes = await fetch(`${SUPABASE_URL}/rest/v1/sales?customer_id=eq.${customerId}&is_deleted=eq.false&select=paid_debt`, { headers: svcHeaders });
+// يحسب رصيد الدين وموعد الاستحقاق المتوقع لكل زبائن الدفعة دفعة واحدة باستعلامين فقط إجمالًا (نفس منطق
+// getCustomerBalance/getExpectedDueDate بـdatabase.js لكن مجمَّع لكل الزبائن معًا بدل استعلام منفصل لكل واحد)
+export async function fetchBalancesAndDueDates(customers, svcHeaders) {
+  const idsParam = encodeURIComponent(`in.(${customers.map(c => c.id).join(',')})`);
+  const [salesRes, paymentsRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/sales?customer_id=${idsParam}&is_deleted=eq.false&select=customer_id,paid_debt,created_at`, { headers: svcHeaders }),
+    fetch(`${SUPABASE_URL}/rest/v1/payments?customer_id=${idsParam}&is_deleted=eq.false&select=customer_id,amount`, { headers: svcHeaders })
+  ]);
   const sales = await salesRes.json();
-  const debtTotal = (Array.isArray(sales) ? sales : []).reduce((s, x) => s + (x.paid_debt || 0), 0);
-  const paymentsRes = await fetch(`${SUPABASE_URL}/rest/v1/payments?customer_id=eq.${customerId}&is_deleted=eq.false&select=amount`, { headers: svcHeaders });
   const payments = await paymentsRes.json();
-  const paidTotal = (Array.isArray(payments) ? payments : []).reduce((s, x) => s + (x.amount || 0), 0);
-  return debtTotal - paidTotal;
-}
 
-// موعد السداد المتوقع = آخر فاتورة دين + دورة السداد (نفس منطق getExpectedDueDate بـ database.js)
-async function getExpectedDueDateRemote(customer, balance, svcHeaders) {
-  const days = CYCLE_DAYS[customer.payment_cycle];
-  if (!days || balance <= 0) return null;
-  const salesRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/sales?customer_id=eq.${customer.id}&is_deleted=eq.false&paid_debt=gt.0&select=created_at&order=created_at.desc&limit=1`,
-    { headers: svcHeaders }
-  );
-  const sales = await salesRes.json();
-  if (!Array.isArray(sales) || !sales.length) return null;
-  const last = new Date(sales[0].created_at);
-  last.setDate(last.getDate() + days);
-  return last.toISOString();
+  const debtTotals = new Map(), paidTotals = new Map(), lastDebtSaleDate = new Map();
+  for (const s of (Array.isArray(sales) ? sales : [])) {
+    debtTotals.set(s.customer_id, (debtTotals.get(s.customer_id) || 0) + (s.paid_debt || 0));
+    if (s.paid_debt > 0) {
+      const prev = lastDebtSaleDate.get(s.customer_id);
+      if (!prev || s.created_at > prev) lastDebtSaleDate.set(s.customer_id, s.created_at);
+    }
+  }
+  for (const p of (Array.isArray(payments) ? payments : [])) {
+    paidTotals.set(p.customer_id, (paidTotals.get(p.customer_id) || 0) + (p.amount || 0));
+  }
+
+  const balances = new Map();
+  const dueDates = new Map();
+  for (const c of customers) {
+    const balance = (debtTotals.get(c.id) || 0) - (paidTotals.get(c.id) || 0);
+    balances.set(c.id, balance);
+    const days = CYCLE_DAYS[c.payment_cycle];
+    const lastSale = lastDebtSaleDate.get(c.id);
+    if (days && balance > 0 && lastSale) {
+      const d = new Date(lastSale);
+      d.setDate(d.getDate() + days);
+      dueDates.set(c.id, d.toISOString());
+    }
+  }
+  return { balances, dueDates };
 }
 
 function formatMoneyPlainRemote(cents) {

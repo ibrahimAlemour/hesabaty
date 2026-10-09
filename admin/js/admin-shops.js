@@ -158,7 +158,11 @@ export async function renderShopDetail(container, shopId) {
       <div class="stat-card"><div class="stat-label">📅 ينتهي في</div><div class="stat-value" style="font-size:15px;">${latestSub ? latestSub.end_date : '—'}</div></div>
       <div class="stat-card cash"><div class="stat-label">✅ إجمالي المدفوع</div><div class="stat-value">${formatMoney(totalPaid)}</div></div>
       <div class="stat-card"><div class="stat-label">🗓️ تاريخ التسجيل</div><div class="stat-value" style="font-size:15px;">${formatDate(shop.created_at)}</div></div>
-      <div class="stat-card profit wide"><div class="stat-label">✉️ إجمالي الرسائل المرسلة</div><div class="stat-value">${shop.sms_segments_total || 0} رسالة</div></div>
+      <div class="stat-card profit wide" style="position:relative;">
+        <div class="stat-label">✉️ إجمالي الرسائل المرسلة</div>
+        <div class="stat-value">${shop.sms_segments_total || 0} رسالة</div>
+        <button class="icon-btn" id="reset-sms-btn" title="تصفير عدّاد الرسائل" style="position:absolute;top:4px;left:4px;width:30px;height:30px;">↺</button>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -194,6 +198,25 @@ export async function renderShopDetail(container, shopId) {
   container.querySelector('#edit-shop-btn').onclick = () => openEditShopSheet(container, shop);
   container.querySelector('#toggle-status-btn').onclick = () => toggleShopStatus(container, shop);
   container.querySelector('#delete-shop-btn').onclick = () => openDeleteShopSheet(shop);
+  container.querySelector('#reset-sms-btn').onclick = () => resetSmsCounter(container, shop);
+}
+
+async function resetSmsCounter(container, shop) {
+  const ok = await confirmDialog({
+    title: 'تصفير عدّاد الرسائل',
+    message: `سيُصفَّر عدّاد رسائل SMS المعروض لمحل "${shop.name}" (حاليًا ${shop.sms_segments_total || 0} رسالة) إلى صفر. هذا لا يؤثر على باقتك الفعلية عند مزوّد SMS - فقط الرقم المعروض هنا.`,
+    confirmLabel: 'تصفير', danger: false
+  });
+  if (!ok) return;
+  try {
+    const admin = await getCurrentAdmin();
+    await adb.resetShopSmsCounter(shop.id);
+    await adb.logAdminAction(admin, 'reset_sms_counter', shop.id, { previousValue: shop.sms_segments_total || 0 });
+    toastSuccess('تم تصفير عدّاد الرسائل');
+    renderShopDetail(container, shop.id);
+  } catch (err) {
+    toastError(err.message || 'حدث خطأ أثناء التصفير. حاول مرة أخرى.');
+  }
 }
 
 function openDeleteShopSheet(shop) {

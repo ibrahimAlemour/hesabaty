@@ -142,6 +142,13 @@ export async function setShopStatus(id, status) {
   return updateShop(id, { status });
 }
 
+// يصفّر عدّاد رسائل SMS المستهلَكة لمحل معيّن (shops.sms_segments_total) - يُستخدم مثلاً بعد شحن باقة
+// رسائل جديدة عند المزوّد، أو لتصحيح العدّاد بعد خلل تسبّب باستهلاك غير طبيعي. لا علاقة له بالباقة الفعلية
+// عند مزوّد SMS نفسه (TweetSMS) - هذا فقط الرقم المعروض محليًا بالتطبيق ولوحة الإدارة
+export async function resetShopSmsCounter(id) {
+  return updateShop(id, { sms_segments_total: 0 });
+}
+
 // ---------- الاشتراكات ----------
 export async function getShopSubscriptions(shopId) {
   const { data, error } = await client().from('subscriptions').select('*').eq('shop_id', shopId).order('end_date', { ascending: false });

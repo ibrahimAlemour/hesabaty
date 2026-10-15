@@ -1,6 +1,6 @@
 // Service Worker: يجعل التطبيق يعمل بالكامل بدون إنترنت (Offline-first)
-const CACHE_NAME = 'hesabaty-cache-v19';
-const RUNTIME_CACHE = 'hesabaty-runtime-v19';
+const CACHE_NAME = 'hesabaty-cache-v20';
+const RUNTIME_CACHE = 'hesabaty-runtime-v20';
 
 // الملفات "الحرجة" التي يجب أن ينجح تخزينها لتفعيل نسخة جديدة من Service Worker: بدونها التطبيق لا
 // يعمل إطلاقًا حتى بالوضع الأساسي. باقي الشاشات (sales.js, reports.js...) غير حرجة لأنها تُجلب وتُخزَّن
@@ -57,7 +57,7 @@ self.addEventListener('install', (event) => {
   // بدل استبدال نسخة كاملة تعمل بنسخة جديدة قد تكون ناقصة وقت اتصال سيئ تحديدًا
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
-      const results = await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+      const results = await Promise.allSettled(APP_SHELL.map((url) => cacheFresh(cache, url)));
       const failedUrls = APP_SHELL.filter((_, i) => results[i].status === 'rejected');
       if (failedUrls.length) console.warn(`[service-worker] تعذّر تخزين ${failedUrls.length} من ${APP_SHELL.length} ملفًا مسبقًا:`, failedUrls);
 
@@ -95,11 +95,27 @@ self.addEventListener('activate', (event) => {
 
 // يفرض حدًا زمنيًا على fetch حتى لا تتعلّق الصفحة بانتظار شبكة ضعيفة/متقطعة (لا "أوف لاين" بشكل صريح يفشل فورًا،
 // بل اتصال بطيء جدًا أو DNS متعثر قد يستغرق دقائق ليفشل من نفسه) - نفترضه فاشلاً بعد المهلة ونرجع للنسخة المخزّنة
+//
+// cache: 'reload' ضروري هنا: fetch() بدون تحديد صريح يخضع لذاكرة التخزين المؤقت العادية بالمتصفح (HTTP cache
+// المبنية على ترويسات Cache-Control/ETag من الخادم) حتى عند استدعائه من Service Worker - أي أن "Network-first"
+// بدون هذا الخيار قد لا يصل فعليًا للشبكة أبدًا، بل يُعاد له نفس الرد القديم المخزّن بذاكرة المتصفح نفسها، رغم
+// أن منطق هذا الملف بالكامل مبني على افتراض أن fetch() هنا = "نسخة طازجة من الشبكة". هذا بالضبط ما كان يُبقي
+// ملفات غير حرجة (مثل customers.js، غير موجودة بـCRITICAL_SHELL) على نسخة قديمة رغم استراتيجية Network-first
+// الظاهرية، ويمنع حتى تخزين CRITICAL_SHELL وقت install() (عبر cacheFresh أدناه) من جلب محتوى طازج فعليًا
 function fetchWithTimeout(request, ms) {
+  const freshRequest = new Request(request, { cache: 'reload' });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('fetch-timeout')), ms);
-    fetch(request).then((res) => { clearTimeout(timer); resolve(res); }, (err) => { clearTimeout(timer); reject(err); });
+    fetch(freshRequest).then((res) => { clearTimeout(timer); resolve(res); }, (err) => { clearTimeout(timer); reject(err); });
   });
+}
+
+// بديل عن cache.add(url) المدمج (يستخدم fetch() الافتراضي الخاضع لذاكرة التخزين المؤقت بالمتصفح كما بالأعلى) -
+// يضمن تخزين نسخة طازجة فعليًا من الشبكة وقت تثبيت نسخة جديدة من Service Worker، لا نسخة قديمة من ذاكرة المتصفح
+async function cacheFresh(cache, url) {
+  const response = await fetch(new Request(url, { cache: 'reload' }));
+  if (!response || !response.ok) throw new Error(`فشل جلب ${url}: ${response && response.status}`);
+  await cache.put(url, response);
 }
 
 self.addEventListener('fetch', (event) => {

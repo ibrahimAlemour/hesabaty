@@ -50,11 +50,26 @@ function tableOf(storeName) {
   return t;
 }
 
+// إصلاح جذري: select('*') وحده بدون ترقيم صفحات صريح يخضع للحد الأقصى الافتراضي لصفوف الاستعلام الواحد
+// بمشروع Supabase (1000 صفًا - Project Settings ⟵ API ⟵ Max Rows)، فتُعاد فقط أول 1000 صف بترتيب غير
+// مضمون. وبما أن pullFromRemote (database.js) يحذف محليًا أي سجل محلي "غير موجود بالصفوف المُستلَمة"، فإن
+// أي جدول تجاوز هذا الحد (sales مثلًا بعد تراكم فواتير كثيرة) كانت تُفقد سجلاته الزائدة محليًا بعد كل سحب،
+// رغم وجودها الفعلي بقاعدة البيانات - هذا يفسّر اختفاء ديون (جدول sales الأكبر عادة) دون دفعات (payments
+// أصغر عادة، لم يصل بعد لنفس العدد). نجلب كل الصفحات فعليًا عبر range() بدل select('*') وحده.
 export async function getAll(storeName) {
   const table = tableOf(storeName);
-  const { data, error } = await supabaseClient.from(table).select('*');
-  if (error) throw error;
-  return data || [];
+  const PAGE_SIZE = 1000;
+  let allRows = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabaseClient.from(table).select('*').range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = data || [];
+    allRows = allRows.concat(page);
+    if (page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return allRows;
 }
 
 export async function getById(storeName, id) {

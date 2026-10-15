@@ -19,6 +19,7 @@ const { withPage, assert, summary } = require('./_harness');
           select() { return self; },
           eq() { return self; },
           maybeSingle() { return resolve(); },
+          range() { return self; }, // دعم ترقيم الصفحات الذي أضافته db-supabase.js (إصلاح حد الـ1000 صف الافتراضي)
           delete() { mode = 'delete'; return self; },
           upsert(p) { mode = 'upsert'; payload = p; return resolve(); },
           then(res, rej) { resolve().then(res, rej); }

@@ -198,29 +198,37 @@ export async function pullFromRemote() {
   const s = await getSettings();
   if (s.backendMode !== 'supabase' || !s.currentShopId || !remoteDb.getClient()) return;
 
-  // كل المخازن المسحوبة قابلة لتكوّن نسخًا محلية "يتيمة" لا وجود لها على الخادم: إما بسبب تصحيح بيانات مباشر
-  // بقاعدة البيانات، أو حذف/تعديل قديم لم يُرفع وقته، أو (الأهم) سجلات محل آخر عالقة محليًا من تبديل محل سابق
-  // على نفس الجهاز لم تُمسح لأي سبب (حالة حقيقية حصلت فعليًا: مورد من محل آخر ظهر محليًا رغم عدم وجوده بسحب
-  // المحل الحالي من سوبابيس). لذلك نطابق المحلي مع الخادم لكل مخزن بعد كل سحب ونحذف محليًا كل صف لم يعد موجودًا
-  // هناك، ما عدا ما هو بانتظار الرفع فعليًا - لا نقتصر على بعض المخازن فقط كما كان سابقًا
-  const RECONCILE_DELETIONS_STORES = new Set(REMOTE_PULL_STORES);
+  // إصلاح جذري لبق اختفاء سجلات (ديون وغيرها) بعد تحديث الصفحة: كل هذا المنطق يمرّ الآن عبر withSyncLock
+  // المشترك مع flushQueue (راجع تعليق withSyncLock بـsync.js للتفاصيل الكاملة). بدون هذا القفل، كان ممكنًا أن
+  // يعمل pullFromRemote وflushQueue بنفس الوقت تقريبًا (يحدث فعليًا بكل تحميل صفحة فيه عمليات لم تُرفع بعد):
+  // لو رفع flushQueue سجلًا بنجاح وأزاله من طابور الانتظار *بالضبط* بين لحظة قراءة pullFromRemote لجدول
+  // سوبابيس (لا يحتوي السجل بعد) ولحظة فحصه لطابور الانتظار (لم يعد يحتوي السجل، لأنه رُفع بنجاح للتو) - يظهر
+  // السجل "يتيمًا" زورًا فيُحذف محليًا رغم نجاح رفعه فعليًا بنفس اللحظة. القفل يضمن تشغيل الدالتين بالتتابع لا
+  // بالتوازي أبدًا، فتُؤخذ كل قراءات "ماذا بسوبابيس الآن" و"ماذا بانتظار الرفع" من حالة مستقرة وثابتة فعليًا.
+  await sync.withSyncLock(async () => {
+    // كل المخازن المسحوبة قابلة لتكوّن نسخًا محلية "يتيمة" لا وجود لها على الخادم: إما بسبب تصحيح بيانات مباشر
+    // بقاعدة البيانات، أو حذف/تعديل قديم لم يُرفع وقته، أو سجلات محل آخر عالقة محليًا من تبديل محل سابق على
+    // نفس الجهاز لم تُمسح لأي سبب. لذلك نطابق المحلي مع الخادم لكل مخزن بعد كل سحب ونحذف محليًا كل صف لم يعد
+    // موجودًا هناك، ما عدا ما هو بانتظار الرفع فعليًا بالطابور (الآن قراءة مستقرة بفضل القفل أعلاه)
+    const RECONCILE_DELETIONS_STORES = new Set(REMOTE_PULL_STORES);
 
-  for (const storeName of REMOTE_PULL_STORES) {
-    try {
-      const rows = await remoteDb.getAll(storeName);
-      if (rows.length) await localDb.bulkPut(storeName, rows);
-      if (RECONCILE_DELETIONS_STORES.has(storeName)) {
-        const remoteIds = new Set(rows.map(r => r.id));
-        const pendingIds = new Set((await sync.getPendingItems()).filter(i => i.storeName === storeName).map(i => i.payload?.id));
-        const localRows = await localDb.getAll(storeName);
-        for (const local of localRows) {
-          if (!remoteIds.has(local.id) && !pendingIds.has(local.id)) await localDb.remove(storeName, local.id);
+    for (const storeName of REMOTE_PULL_STORES) {
+      try {
+        const rows = await remoteDb.getAll(storeName);
+        if (rows.length) await localDb.bulkPut(storeName, rows);
+        if (RECONCILE_DELETIONS_STORES.has(storeName)) {
+          const remoteIds = new Set(rows.map(r => r.id));
+          const pendingIds = new Set((await sync.getPendingItems()).filter(i => i.storeName === storeName).map(i => i.payload?.id));
+          const localRows = await localDb.getAll(storeName);
+          for (const local of localRows) {
+            if (!remoteIds.has(local.id) && !pendingIds.has(local.id)) await localDb.remove(storeName, local.id);
+          }
         }
+      } catch (e) {
+        console.error(`فشل سحب بيانات ${storeName} من سوبابيس`, e);
       }
-    } catch (e) {
-      console.error(`فشل سحب بيانات ${storeName} من سوبابيس`, e);
     }
-  }
+  });
 
   await pullSettingsFromRemote();
 }

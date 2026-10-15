@@ -7,6 +7,23 @@ import { toastWarning, toastSuccess } from './ui.js';
 let syncing = false;
 const listeners = [];
 
+// إصلاح جذري لبق فقدان بيانات حقيقي (ديون تختفي بعد تحديث الصفحة): flushQueue() وpullFromRemote()
+// (بـdatabase.js) كانا يعملان أحيانًا بنفس الوقت تمامًا دون أي تنسيق بينهما - كل تحميل صفحة يستدعي الاثنين:
+// flushQueue() بدون انتظار (fire-and-forget) من app.js، وpullFromRemote() بالتوازي معه تقريبًا. هذا يسبب
+// حالة تسابق حقيقية: pullFromRemote يقارن "ما بسوبابيس الآن" بـ"ما هو بانتظار الرفع بالطابور المحلي" ليحذف
+// محليًا أي سجل "يتيم" غير موجود بالاثنين معًا - لكن سجلًا رُفع بنجاح للتو عبر flushQueue (فأُزيل من الطابور)
+// لكن لم تلتقطه بعد قراءة pullFromRemote لجدول سوبابيس (لأنها حدثت قبل لحظة اكتمال الرفع بالضبط) يظهر "يتيمًا"
+// زورًا فيُحذف محليًا رغم نجاح رفعه فعليًا - وهذا بالضبط ما يفسّر اختفاء ديون حُفظت ورُفعت بنجاح بعد تحديث الصفحة.
+// الحل: قفل تسلسلي مشترك (نفس نمط withInvoiceLock المُثبَت بـdatabase.js) يضمن ألا يعمل flushQueue وpullFromRemote
+// أبدًا بنفس الوقت، بغض النظر عن أي من المسارات العديدة التي تُطلق كل واحد منهما (تحميل صفحة، مؤقّت كل 30 ثانية،
+// عودة الاتصال، استعادة من الخلفية، زر "مزامنة الآن" بالإعدادات...)
+let syncLockChain = Promise.resolve();
+export function withSyncLock(fn) {
+  const run = syncLockChain.then(fn, fn);
+  syncLockChain = run.catch(() => {});
+  return run;
+}
+
 export function onSyncStatusChange(cb) {
   listeners.push(cb);
   return () => { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1); };
@@ -106,32 +123,36 @@ export async function flushQueue() {
   if (!navigator.onLine) return;
   syncing = true;
   try {
-    if (!(await ensureRemoteClient())) return;
-    notify('syncing');
-    const items = await localDb.getAll('syncQueue');
-    items.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    for (const item of items) {
-      try {
-        if (item.operation === 'put') {
-          await remoteDb.put(item.storeName, item.payload);
-        } else if (item.operation === 'remove') {
-          await remoteDb.remove(item.storeName, item.payload.id);
+    // كل العمل الفعلي يمرّ عبر withSyncLock حتى لا يتشابك أبدًا مع pullFromRemote (راجع تعليق withSyncLock
+    // أعلاه - هذا هو الإصلاح الجذري لبق اختفاء سجلات رُفعت بنجاح بعد تحديث الصفحة)
+    await withSyncLock(async () => {
+      if (!(await ensureRemoteClient())) return;
+      notify('syncing');
+      const items = await localDb.getAll('syncQueue');
+      items.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      for (const item of items) {
+        try {
+          if (item.operation === 'put') {
+            await remoteDb.put(item.storeName, item.payload);
+          } else if (item.operation === 'remove') {
+            await remoteDb.remove(item.storeName, item.payload.id);
+          }
+          await localDb.remove('syncQueue', item.id);
+        } catch (err) {
+          item.attempts = (item.attempts || 0) + 1;
+          item.lastError = err.message || String(err);
+          item.lastAttemptAt = nowISO();
+          await localDb.put('syncQueue', item);
+          if (item.attempts >= 5) {
+            console.error('فشلت مزامنة عملية بعد عدة محاولات', item, err);
+          }
+          break; // نحافظ على الترتيب: نوقف المزامنة عند أول فشل حتى لا تختل الحركات
         }
-        await localDb.remove('syncQueue', item.id);
-      } catch (err) {
-        item.attempts = (item.attempts || 0) + 1;
-        item.lastError = err.message || String(err);
-        item.lastAttemptAt = nowISO();
-        await localDb.put('syncQueue', item);
-        if (item.attempts >= 5) {
-          console.error('فشلت مزامنة عملية بعد عدة محاولات', item, err);
-        }
-        break; // نحافظ على الترتيب: نوقف المزامنة عند أول فشل حتى لا تختل الحركات
       }
-    }
-    const remaining = await getPendingCount();
-    notify(remaining ? 'pending' : 'synced');
-    if (remaining === 0 && items.length) toastSuccess('تمت مزامنة جميع العمليات مع الخادم');
+      const remaining = await getPendingCount();
+      notify(remaining ? 'pending' : 'synced');
+      if (remaining === 0 && items.length) toastSuccess('تمت مزامنة جميع العمليات مع الخادم');
+    });
   } finally {
     syncing = false;
   }

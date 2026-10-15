@@ -120,7 +120,12 @@ self.addEventListener('fetch', (event) => {
             if (response && response.ok) caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', response.clone()));
           }).catch(() => {});
           return cached || fetchWithTimeout(request, 4000).catch(() => new Response('', { status: 503 }));
-        })
+        }).catch(() =>
+          // قراءة الكاش نفسها (caches.match) قد تفشل أحيانًا (تحديدًا أثناء لحظة ترحيل/حذف نسخة كاش قديمة
+          // بـactivate()) - بدون هذا catch يبقى الرفض غير مُعالَج فيظهر للمستخدم ERR_FAILED بدل فتح الصفحة
+          // فعليًا رغم توفر الإنترنت؛ هنا نسقط مباشرة لطلب الشبكة مباشرة كخط دفاع أخير
+          fetchWithTimeout(request, 4000).catch(() => new Response('', { status: 503 }))
+        )
       );
       return;
     }
@@ -132,7 +137,12 @@ self.addEventListener('fetch', (event) => {
         const clone = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
         return response;
-      }).catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
+      }).catch(() =>
+        caches.match(request)
+          .then((cached) => cached || caches.match('./index.html'))
+          // نفس خط الدفاع: لو فشلت قراءة الكاش نفسها أثناء السقوط للنسخة المحلية، لا نترك الرفض بلا معالجة
+          .catch(() => new Response('', { status: 503 }))
+      )
     );
     return;
   }

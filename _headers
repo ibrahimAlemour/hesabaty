@@ -1,0 +1,7 @@
+# خط دفاع إضافي على مستوى الخادم: يضمن أن المتصفح يفحص هذا الملف تحديدًا عبر الشبكة دائمًا عند كل فحص
+# تحديث لـService Worker (لا يعتمد فقط على updateViaCache: 'none' بصفحة التسجيل - هذا يضمن نفس الشيء
+# حتى لو حصل الفحص من مسار لا يمر بذاك الخيار)
+/service-worker.js
+  Cache-Control: no-cache
+/admin/service-worker.js
+  Cache-Control: no-cache

@@ -91,15 +91,25 @@ function registerMock(remoteSales) {
     assert('بعد تحديث الصفحة أثناء الانقطاع: الديون العشر لم تُفقد محليًا', afterReloadStillOffline.localCount === 10);
     assert('بعد تحديث الصفحة أثناء الانقطاع: العشرة ما زالت بانتظار الرفع (لم تُفقد من الطابور)', afterReloadStillOffline.pendingSalesCount === 10);
 
-    // 3) عودة الاتصال + مزامنة كل العمليات المعلّقة
-    await page.context().setOffline(false);
+    // 3) عودة الاتصال + مزامنة كل العمليات المعلّقة. هذا الاختبار يحمّل index.html كاملة (لا وحدات معزولة)،
+    // وapp.js الحقيقي يستدعي initAutoSync() عند تحميله (مسجَّل بالفعل منذ إعادة التحميل بالخطوة 2) - أي أن
+    // مستمع 'online' الحقيقي بالتطبيق نفسه موجود فعلًا وسيُطلِق flushQueue() تلقائيًا بمجرد عودة الاتصال، تمامًا
+    // كما يحصل بالاستخدام الفعلي. لا نستدعي flushQueue() يدويًا هنا: استدعاء إضافي صريح كان يتسابق فعليًا مع
+    // هذا المستمع التلقائي (كلاهما يحاول العمل بنفس اللحظة) ويُسبّب قياسًا غير مكتمل - نكتفي بإعادة تسجيل الموك
+    // ثم الانتظار الفعلي لاكتمال التفريغ، تمامًا كما يختبر مستخدم حقيقي استعادة الاتصال دون تدخل يدوي
     await page.evaluate((fn) => eval(`(${fn})`)(window.__remoteSales = []), registerMock.toString());
     await page.evaluate(async () => {
       const dbSupabase = await import('./js/db-supabase.js');
       await dbSupabase.initSupabaseClient({ url: 'https://fake.supabase.co', anonKey: 'fake' });
-      await (await import('./js/sync.js')).flushQueue();
     });
-    await page.waitForTimeout(400);
+    await page.context().setOffline(false);
+    // استطلاع صريح من جانب Node (لا page.waitForFunction - لوحظ أنه قد "يرضى" بحالة عابرة لا تعكس فعليًا
+    // اكتمال التفريغ هنا) لخلو الطابور بالكامل (كل الأنواع)، كل 100ms حتى اكتمال فعلي أو انتهاء المهلة
+    for (let waited = 0; waited < 15000; waited += 100) {
+      const count = await page.evaluate(async () => (await (await import('./js/sync.js')).getPendingItems()).length);
+      if (count === 0) break;
+      await page.waitForTimeout(100);
+    }
     const afterSync = await page.evaluate(async () => {
       const sync = await import('./js/sync.js');
       const pending = await sync.getPendingItems();

@@ -61,7 +61,11 @@
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const reg = await navigator.serviceWorker.register('service-worker.js');
+      // updateViaCache: 'none' ضروري جدًا: بدونه، حتى طلب فحص التحديث نفسه (register وupdate() أدناه) يخضع
+      // لذاكرة HTTP العادية بالمتصفح لملف service-worker.js نفسه - فقد يستمر المتصفح "يفحص" ويحصل فعليًا على
+      // نفس النسخة القديمة المخزّنة لديه من قبل، دون أن يكتشف وجود نسخة أحدث إطلاقًا مهما كرّرنا الفحص أو رفعنا
+      // رقم الإصدار داخل الملف - هذا بالضبط نفس خلل "fetch() يخضع لذاكرة HTTP" المُصلَح بمعالج fetch بالملف نفسه
+      const reg = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
       // المتصفح لا يفحص وجود نسخة أحدث من الملف إلا مرة كل 24 ساعة تقريبًا بشكل تلقائي، فقد يبقى جهاز
       // مستخدم لا يفتح التطبيق كثيرًا يشتغل بنسخة قديمة من Service Worker لفترة طويلة حتى بعد نشر إصلاح فعلي.
       // نفرض فحصًا فوريًا عند كل فتح للتطبيق، وأيضًا كل مرة يُستعاد التطبيق من الخلفية، لتصل الإصلاحات بسرعة

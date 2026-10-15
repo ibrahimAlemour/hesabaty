@@ -51,7 +51,9 @@
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch(err => console.error('SW registration failed', err));
+    // updateViaCache: 'none' - راجع نفس التعليق بـindex.html الرئيسي: بدونه يبقى فحص تحديث Service Worker
+    // نفسه خاضعًا لذاكرة HTTP بالمتصفح، فقد لا يكتشف نسخة أحدث إطلاقًا مهما تكرر الفحص
+    navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).catch(err => console.error('SW registration failed', err));
   });
 }
 </script>

@@ -226,11 +226,21 @@ function renderTemplatePreview(card, templates) {
   `;
 }
 
+// زبون "صالح فعليًا" لرسالة تذكير بدين: عنده رقم جوال (وإلا يستحيل الإرسال أصلًا) وعليه رصيد دين فعلي
+// (وإلا فلا داعي لتذكيره - وخادم الإرسال worker.js يتجاهله فعليًا بنفس الشرط: "if (balance <= 0) continue").
+// هذا فلتر عرض/تصدير فقط بالأوضاع التلقائية (all/weekly/monthly) - لا يُغيّر قائمة الاستثناء الفعلية
+// المُرسَلة للخادم (تبقى كما هي تمامًا، فلا خطر من أي فرق بين المعروض وما سيصل فعليًا)، ولا يُطبَّق على
+// "تحديد يدوي" عمدًا: تلك القائمة (data.allCustomers الكاملة) تُستخدم أيضًا لحساب excludedCustomerIds
+// عند الحفظ (كل من لم يُحدَّد يدويًا يصبح مستثنى) - فلترتها هنا كانت ستُسقط زبائن من تلك الحسبة بالخطأ
+function isSmsEligible(c) {
+  return !!(c.phone && c.phone.trim()) && (c.balance || 0) > 0;
+}
+
 // يحسب قائمة المستلمين الحالية حسب الوضع المختار (بدون أي تغيير بمنطق التصفية الفعلي بالخادم)
 function currentRecipientIds(allCustomers) {
   const s = composeState;
   if (s.recipientMode === 'manual') return new Set(s.manualSelectedIds);
-  const pool = allCustomers.filter(c => s.recipientMode === 'all' || c.payment_cycle === s.recipientMode);
+  const pool = allCustomers.filter(c => (s.recipientMode === 'all' || c.payment_cycle === s.recipientMode) && isSmsEligible(c));
   return new Set(pool.filter(c => !s.excludedIds.has(c.id)).map(c => c.id));
 }
 
@@ -305,7 +315,7 @@ function renderManualSelect(card, data) {
 // "خيارات إضافية": استثناء زبائن محددين من الفئة المختارة حاليًا (نفس آلية excluded_customer_ids الحالية تمامًا)
 function openExcludeSheet(container, data) {
   const s = composeState;
-  const pool = data.allCustomers.filter(c => s.recipientMode === 'all' || c.payment_cycle === s.recipientMode);
+  const pool = data.allCustomers.filter(c => (s.recipientMode === 'all' || c.payment_cycle === s.recipientMode) && isSmsEligible(c));
   const overlay = openSheet(`
     <div class="sheet-header"><h3>خيارات إضافية</h3>${closeBtnHtml()}</div>
     <p class="hint" style="padding:0 4px;">فُك التحديد لاستثناء زبون من هذه الرسالة فقط (يبقى ضمن فئته بالجدولات القادمة)</p>

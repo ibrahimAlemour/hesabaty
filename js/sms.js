@@ -3,7 +3,7 @@
 // هذه الشاشة تدير البيانات فقط (لا تغيير إطلاقًا بمنطق الإرسال أو حساب الرسائل أو البيانات المخزّنة).
 import * as db from './database.js';
 import { getCurrentUser, canDelete } from './auth.js';
-import { escapeHtml, formatDateTime, fuzzyMatch, debounce } from './utils.js';
+import { escapeHtml, formatDateTime, fuzzyMatch, debounce, fromCents } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState } from './ui.js';
 
 const TARGET_LABELS = { all: 'كل الزبائن', weekly: 'الزبائن الأسبوعيين', monthly: 'الزبائن الشهريين' };
@@ -153,6 +153,7 @@ function renderComposeCard(container, data) {
     <div class="form-group"><label>اسم الجدولة (اختياري، للتمييز بالسجل فقط)</label><input type="text" id="cmp-name" placeholder="مثال: تذكير نهاية الشهر" value="${escapeHtml(s.name)}"></div>
 
     <div class="totals-box" id="cmp-summary"></div>
+    <button type="button" class="btn btn-outline btn-block" style="margin-bottom:10px;" id="cmp-export-excel">⬇️ تنزيل قائمة المستلمين (Excel)</button>
 
     <button type="button" class="btn btn-primary btn-block" id="cmp-send-btn">✈️ ${s.editingScheduleId ? 'حفظ التعديلات' : 'إرسال الرسائل'}</button>
     ${s.editingScheduleId ? `<button type="button" class="btn btn-secondary btn-block" style="margin-top:8px;" id="cmp-cancel-edit">إلغاء التعديل</button>` : ''}
@@ -202,6 +203,7 @@ function renderComposeCard(container, data) {
   card.querySelector('#cmp-recurring').onchange = (e) => { composeState.recurring = e.target.value; };
   card.querySelector('#cmp-name').oninput = (e) => { composeState.name = e.target.value; };
 
+  card.querySelector('#cmp-export-excel').onclick = () => exportRecipientsExcel(data);
   card.querySelector('#cmp-send-btn').onclick = () => handleSend(container, data);
   const cancelEditBtn = card.querySelector('#cmp-cancel-edit');
   if (cancelEditBtn) cancelEditBtn.onclick = () => { composeState = freshComposeState(); renderComposeCard(container, data); };
@@ -230,6 +232,33 @@ function currentRecipientIds(allCustomers) {
   if (s.recipientMode === 'manual') return new Set(s.manualSelectedIds);
   const pool = allCustomers.filter(c => s.recipientMode === 'all' || c.payment_cycle === s.recipientMode);
   return new Set(pool.filter(c => !s.excludedIds.has(c.id)).map(c => c.id));
+}
+
+function csvField(value) {
+  const s = value == null ? '' : String(value);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+function csvRow(fields) { return fields.map(csvField).join(',') + '\r\n'; }
+
+// تصدير قائمة المستلمين النهائية إلى ملف يُفتح مباشرة بإكسل - يستخدم currentRecipientIds() نفسها المستخدمة
+// فعليًا عند الإرسال (لا حساب منفصل) حتى تُطابق القائمة المصدَّرة تمامًا من سيصلهم الرسالة فعليًا، بلا أي فرق
+function exportRecipientsExcel(data) {
+  const recipientIds = currentRecipientIds(data.allCustomers);
+  if (!recipientIds.size) return;
+  const recipients = data.allCustomers.filter(c => recipientIds.has(c.id));
+
+  let csv = '﻿'; // BOM لضمان ظهور النصوص العربية بشكل صحيح عند فتح الملف ببرامج مثل Excel
+  csv += csvRow(['اسم الشخص', 'رقم الجوال', 'المبلغ المستحق']);
+  for (const c of recipients) csv += csvRow([c.name, c.phone || '', fromCents(c.balance)]);
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `hesabaty-sms-recipients-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toastSuccess(`تم تنزيل قائمة ${recipients.length} مستلمًا`);
 }
 
 function renderManualSelect(card, data) {
@@ -303,6 +332,7 @@ function updateSummary(card, data) {
   const s = composeState;
   const summaryEl = card.querySelector('#cmp-summary');
   const sendBtn = card.querySelector('#cmp-send-btn');
+  const exportBtn = card.querySelector('#cmp-export-excel');
   if (!summaryEl) return;
 
   const recipientIds = currentRecipientIds(data.allCustomers);
@@ -319,6 +349,8 @@ function updateSummary(card, data) {
 
   const valid = !!s.templateId && count > 0 && (s.timing === 'now' || (s.laterDate && s.laterTime));
   if (sendBtn) sendBtn.disabled = !valid;
+  // تصدير القائمة لا يحتاج قالبًا ولا موعدًا محددًا - فقط وجود مستلمين فعليًا، حتى تقدر تراجعها قبل إكمال باقي الخطوات
+  if (exportBtn) exportBtn.disabled = count === 0;
 }
 
 async function handleSend(container, data) {

@@ -169,6 +169,16 @@ export async function getAllLatestSubscriptions() {
   return byShop;
 }
 
+// عدد الزبائن والموردين لكل محل (دفعة واحدة لكل المحلات عبر دالة تجميع بقاعدة البيانات - راجع admin_shop_entity_counts
+// بـschema_saas.sql - تفاديًا لحد الـ1000 صف الافتراضي بـSupabase لو استُعلِم عن جدول customers/suppliers مباشرة)
+export async function getShopEntityCounts() {
+  const { data, error } = await client().rpc('admin_shop_entity_counts');
+  if (error) throw error;
+  const byShop = new Map();
+  for (const row of data || []) byShop.set(row.shop_id, { customerCount: Number(row.customer_count) || 0, supplierCount: Number(row.supplier_count) || 0 });
+  return byShop;
+}
+
 export async function addSubscriptionPeriod({ shopId, monthlyPrice, startDate, endDate, notes }) {
   const { data, error } = await client().from('subscriptions').insert({
     shop_id: shopId, monthly_price: monthlyPrice, start_date: startDate, end_date: endDate, notes: notes || ''

@@ -11,9 +11,14 @@ let cachedQuery = '';
 
 export async function renderShopsList(container) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
-  const [shops, latestSubs, adminSettings] = await Promise.all([adb.listShops(), adb.getAllLatestSubscriptions(), adb.getAdminSettings()]);
+  const [shops, latestSubs, adminSettings, entityCounts] = await Promise.all([
+    adb.listShops(), adb.getAllLatestSubscriptions(), adb.getAdminSettings(), adb.getShopEntityCounts()
+  ]);
   const grace = (adminSettings && adminSettings.grace_period_days) || 7;
-  const enriched = shops.map(s => ({ ...s, sub: latestSubs.get(s.id) || null, computedStatus: computeShopStatus(s, latestSubs.get(s.id), grace) }));
+  const enriched = shops.map(s => ({
+    ...s, sub: latestSubs.get(s.id) || null, computedStatus: computeShopStatus(s, latestSubs.get(s.id), grace),
+    counts: entityCounts.get(s.id) || { customerCount: 0, supplierCount: 0 }
+  }));
   render(container, enriched, cachedQuery);
 }
 
@@ -51,6 +56,7 @@ function shopRow(s) {
         <div class="shop-name">${escapeHtml(s.name)}</div>
         <div class="shop-meta">${escapeHtml(s.owner_name || '')} ${s.phone ? '- ' + escapeHtml(s.phone) : ''}</div>
         <div class="shop-meta">تاريخ التسجيل: ${formatDate(s.created_at)}${s.sub ? ' - سعر الاشتراك: ' + formatMoney(s.sub.monthly_price) : ''}</div>
+        <div class="shop-meta">👥 ${s.counts.customerCount} زبون${s.counts.supplierCount ? ` - 🚚 ${s.counts.supplierCount} مورد` : ''}</div>
       </div>
       <span class="badge status-${s.computedStatus}">${statusIcon(s.computedStatus)} ${statusLabel(s.computedStatus)}</span>
     </div>`;
@@ -135,13 +141,14 @@ function openCreatedShopSuccessSheet(container, result) {
 // ---------- تفاصيل المحل ----------
 export async function renderShopDetail(container, shopId) {
   container.innerHTML = `<div class="skeleton" style="height:300px;"></div>`;
-  const [shop, subs, payments, adminSettings] = await Promise.all([
-    adb.getShop(shopId), adb.getShopSubscriptions(shopId), adb.getShopPayments(shopId), adb.getAdminSettings()
+  const [shop, subs, payments, adminSettings, entityCounts] = await Promise.all([
+    adb.getShop(shopId), adb.getShopSubscriptions(shopId), adb.getShopPayments(shopId), adb.getAdminSettings(), adb.getShopEntityCounts()
   ]);
   if (!shop) { container.innerHTML = `<div class="card">المحل غير موجود</div>`; return; }
   const grace = (adminSettings && adminSettings.grace_period_days) || 7;
   const latestSub = subs[0] || null;
   const computedStatus = computeShopStatus(shop, latestSub, grace);
+  const counts = entityCounts.get(shop.id) || { customerCount: 0, supplierCount: 0 };
 
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
 
@@ -158,6 +165,8 @@ export async function renderShopDetail(container, shopId) {
       <div class="stat-card"><div class="stat-label">📅 ينتهي في</div><div class="stat-value" style="font-size:15px;">${latestSub ? latestSub.end_date : '—'}</div></div>
       <div class="stat-card cash"><div class="stat-label">✅ إجمالي المدفوع</div><div class="stat-value">${formatMoney(totalPaid)}</div></div>
       <div class="stat-card"><div class="stat-label">🗓️ تاريخ التسجيل</div><div class="stat-value" style="font-size:15px;">${formatDate(shop.created_at)}</div></div>
+      <div class="stat-card"><div class="stat-label">👥 عدد الزبائن</div><div class="stat-value">${counts.customerCount}</div></div>
+      <div class="stat-card"><div class="stat-label">🚚 عدد الموردين</div><div class="stat-value">${counts.supplierCount}</div></div>
       <div class="stat-card profit wide" style="position:relative;">
         <div class="stat-label">✉️ إجمالي الرسائل المرسلة</div>
         <div class="stat-value">${shop.sms_segments_total || 0} رسالة</div>

@@ -728,6 +728,28 @@ create policy attachments_storage_delete on storage.objects for delete using (
   bucket_id = 'attachments' and (storage.foldername(name))[1] = my_shop_id()::text and (is_owner() or is_super_admin())
 );
 
+-- ---------- 24) عدد الزبائن والموردين لكل محل - لعرضها بلوحة المدير العام (تخطيط تسعير اشتراك حسب الحجم) ----------
+-- دالة تجميع واحدة (صف واحد لكل محل، لا صف لكل زبون/مورد) بدل select('*') مباشر على customers/suppliers من
+-- لوحة الإدارة: تفادٍ متعمَّد لنفس مشكلة حد الـ1000 صف الافتراضي بـSupabase (راجع إصلاح db-supabase.js سابقًا) -
+-- هذه الدالة تُرجع فقط عدد صفوف بعدد المحلات (عادة عشرات لا آلاف)، بغض النظر عن عدد الزبائن الفعلي بكل محل
+create or replace function admin_shop_entity_counts()
+returns table (shop_id uuid, customer_count bigint, supplier_count bigint)
+language plpgsql security definer set search_path = public stable as $$
+begin
+  if not is_super_admin() then
+    raise exception 'غير مصرح - Super Admin فقط';
+  end if;
+  return query
+    select
+      s.id,
+      (select count(*) from customers c where c.shop_id = s.id and c.is_deleted = false),
+      (select count(*) from suppliers sp where sp.shop_id = s.id and sp.is_deleted = false)
+    from shops s;
+end;
+$$;
+
+grant execute on function admin_shop_entity_counts() to authenticated;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

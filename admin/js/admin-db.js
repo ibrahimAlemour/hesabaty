@@ -179,6 +179,16 @@ export async function getShopEntityCounts() {
   return byShop;
 }
 
+// آخر نشاط فعلي لكل محل (أحدث created_at بسجل audit_log الخاص به - يغطي كل عمليات الإنشاء/التعديل/الحذف
+// الرئيسية، راجع admin_shop_last_activity بـschema_saas.sql). null يعني المحل لم يسجّل أي عملية بعد إطلاقًا
+export async function getShopLastActivity() {
+  const { data, error } = await client().rpc('admin_shop_last_activity');
+  if (error) throw error;
+  const byShop = new Map();
+  for (const row of data || []) byShop.set(row.shop_id, row.last_activity_at || null);
+  return byShop;
+}
+
 export async function addSubscriptionPeriod({ shopId, monthlyPrice, startDate, endDate, notes }) {
   const { data, error } = await client().from('subscriptions').insert({
     shop_id: shopId, monthly_price: monthlyPrice, start_date: startDate, end_date: endDate, notes: notes || ''

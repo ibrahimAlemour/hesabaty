@@ -750,6 +750,28 @@ $$;
 
 grant execute on function admin_shop_entity_counts() to authenticated;
 
+-- ---------- 25) آخر نشاط لكل محل (تاريخ ووقت آخر عملية فعلية) - لعرضها بلوحة المدير العام ----------
+-- audit_log يسجّل كل عملية إنشاء/تعديل/حذف فعلية بأي جدول رئيسي (مبيعات، دفعات، زبائن، منتجات، موردين،
+-- مشتريات...، راجع addAudit() بـdatabase.js) - أدق مصدر فعلي لـ"متى كان آخر نشاط بهذا المحل"، بدل الاعتماد
+-- على updated_at لجدول واحد بعينه قد لا يعكس نشاطًا بجدول آخر. فهرس (shop_id, created_at) ضروري هنا لأن
+-- الجدول ينمو باستمرار وهذا الاستعلام (MAX لكل محل) يُنفَّذ بكل مرة تُفتح فيها قائمة المحلات بلوحة الإدارة
+create index if not exists idx_audit_log_shop_created on audit_log (shop_id, created_at desc);
+
+create or replace function admin_shop_last_activity()
+returns table (shop_id uuid, last_activity_at timestamptz)
+language plpgsql security definer set search_path = public stable as $$
+begin
+  if not is_super_admin() then
+    raise exception 'غير مصرح - Super Admin فقط';
+  end if;
+  return query
+    select s.id, (select max(a.created_at) from audit_log a where a.shop_id = s.id)
+    from shops s;
+end;
+$$;
+
+grant execute on function admin_shop_last_activity() to authenticated;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

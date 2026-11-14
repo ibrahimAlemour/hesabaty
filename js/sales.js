@@ -7,7 +7,13 @@ let saleState;
 let editingSaleId = null;
 
 function freshState() {
-  return { customer: null, items: [], payMode: 'single', activeMethod: 'cash', split: { cash: 0, transfer: 0, debt: 0 }, transferRef: '', transferBank: '', notes: '' };
+  return { customer: null, customerAlias: '', items: [], payMode: 'single', activeMethod: 'cash', split: { cash: 0, transfer: 0, debt: 0 }, transferRef: '', transferBank: '', notes: '' };
+}
+
+// الاسم المعروض لزبون الفاتورة: زبون مسجَّل (بالاسم) ← اسم مستعار اختياري كُتب يدويًا ← "زبون بدون اسم" افتراضيًا
+function displayCustomerName() {
+  if (saleState.customer) return saleState.customer.name;
+  return saleState.customerAlias || 'زبون بدون اسم';
 }
 
 export async function renderNewSale(container) {
@@ -32,6 +38,8 @@ export async function renderEditSale(container, saleId) {
   container._categoryIcons = new Map(categories.map(c => [c.id, c.icon]));
   saleState = {
     customer: customer || null,
+    // استعادة الاسم المستعار المحفوظ سابقًا (لو الفاتورة ما كانت لزبون مسجَّل أصلًا وكُتب لها اسم غير الافتراضي)
+    customerAlias: (!customer && sale.customer_name_snapshot && sale.customer_name_snapshot !== 'زبون بدون اسم') ? sale.customer_name_snapshot : '',
     items: sale.items.map(it => ({ product_id: it.product_id, product_name: it.product_name, quantity: it.quantity, unit: it.unit, cost_price: fromCents(it.cost_price), selling_price: fromCents(it.selling_price) })),
     payMode: 'split',
     activeMethod: 'cash',
@@ -50,7 +58,7 @@ function renderSaleScreen(container) {
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar">${saleState.customer ? escapeHtml(saleState.customer.name[0]) : '💵'}</div>
         <div>
-          <div style="font-weight:700;font-size:14.5px;">${saleState.customer ? escapeHtml(saleState.customer.name) : 'زبون بدون اسم'}</div>
+          <div style="font-weight:700;font-size:14.5px;">${escapeHtml(displayCustomerName())}</div>
           <div style="font-size:12px;color:var(--text-muted);">${saleState.customer ? 'اضغط لتغيير الزبون' : 'اضغط لاختيار زبون'}</div>
         </div>
       </div>
@@ -290,8 +298,13 @@ function openCustomerSheet(container) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input type="text" id="customer-search" placeholder="ابحث عن زبون...">
     </div>
-    <div class="list-item" style="cursor:pointer;" id="pick-cash-customer">
-      <div class="avatar">💵</div><div class="info"><div class="title">زبون بدون اسم</div></div>
+    <div class="card" style="padding:10px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="avatar">💵</div>
+        <input type="text" id="cash-customer-alias" placeholder="بدون زبون مسجَّل - اكتب اسمًا مستعارًا (اختياري)"
+          style="flex:1;border:none;background:transparent;font-size:13.5px;padding:6px 0;" value="${escapeHtml(saleState.customerAlias || '')}">
+      </div>
+      <button class="btn btn-secondary btn-block" style="margin-top:8px;" id="pick-cash-customer">استخدام بدون زبون مسجَّل</button>
     </div>
     <div id="customer-results" class="customer-select-list"></div>
     <button class="btn btn-secondary btn-block" style="margin-top:10px;" id="add-new-customer-btn">+ إضافة زبون جديد</button>
@@ -299,6 +312,7 @@ function openCustomerSheet(container) {
 
   overlay.querySelector('#pick-cash-customer').onclick = () => {
     saleState.customer = null;
+    saleState.customerAlias = overlay.querySelector('#cash-customer-alias').value.trim();
     closeSheet();
     renderSaleScreen(container);
   };
@@ -314,6 +328,7 @@ function openCustomerSheet(container) {
     overlay.querySelectorAll('[data-pick]').forEach(el => el.onclick = async () => {
       const c = customers.find(x => x.id === el.dataset.pick);
       saleState.customer = c;
+      saleState.customerAlias = '';
       closeSheet();
       renderSaleScreen(container);
     });
@@ -342,6 +357,7 @@ function openAddCustomerSheet(container) {
     try {
       const customer = await db.addCustomer({ name, phone, notes: overlay.querySelector('#nc-notes').value.trim() });
       saleState.customer = customer;
+      saleState.customerAlias = '';
       closeSheet();
       toastSuccess('تم إضافة الزبون');
       renderSaleScreen(container);
@@ -425,7 +441,7 @@ async function completeSale(container) {
   try {
     const payload = {
       customerId: saleState.customer ? saleState.customer.id : null,
-      customerName: saleState.customer ? saleState.customer.name : 'زبون بدون اسم',
+      customerName: displayCustomerName(),
       items: saleState.items,
       paidCash: fromCents(cash), paidTransfer: fromCents(transfer), paidDebt: fromCents(debt),
       transferReference: saleState.transferRef, transferBank: saleState.transferBank,

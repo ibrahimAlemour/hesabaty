@@ -543,10 +543,12 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
 }
 
 function openAddChargeSheet(customer, onDone) {
+  const todayValue = new Date().toISOString().slice(0, 10);
   const overlay = openSheet(`
     <div class="sheet-header"><h3>إضافة دين - ${escapeHtml(customer.name)}</h3></div>
     <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">لتسجيل دين بمبلغ مباشر بدون اختيار منتجات (مثلاً رسوم أو تسوية دين).</p>
     <div class="form-group"><label>المبلغ</label><input type="number" id="charge-amount" step="0.5" min="0" placeholder="0"></div>
+    <div class="form-group"><label>تاريخ الدين</label><input type="date" id="charge-date" value="${todayValue}"></div>
     <div class="form-group"><label>ملاحظات (اختياري)</label><textarea id="charge-notes" placeholder="سبب الدين"></textarea></div>
     <button class="btn btn-primary btn-block" id="charge-save">حفظ</button>
   `, { onOpen: (el) => el.querySelector('#charge-amount').focus() });
@@ -555,11 +557,13 @@ function openAddChargeSheet(customer, onDone) {
     const btn = overlay.querySelector('#charge-save');
     const amount = parseFloat(overlay.querySelector('#charge-amount').value);
     if (!amount || amount <= 0) return toastError('أدخل مبلغًا صحيحًا');
+    const dateValue = overlay.querySelector('#charge-date').value;
+    if (!dateValue) return toastError('حدد تاريخ الدين');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       await db.addManualDebtCharge({
         customerId: customer.id, customerName: customer.name, amount,
-        notes: overlay.querySelector('#charge-notes').value.trim()
+        notes: overlay.querySelector('#charge-notes').value.trim(), createdAt: new Date(dateValue).toISOString()
       });
       closeSheet();
       toastSuccess('تم تسجيل الدين على الزبون');

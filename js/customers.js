@@ -1,7 +1,7 @@
 // شاشات الزبائن: القائمة، إضافة، تفاصيل الحساب، تسجيل دفعة
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, toCents, startOfDay, endOfDay, isValidPhone } from './utils.js';
+import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, toCents, startOfDay, endOfDay, isValidPhone, combineDateWithCurrentTime } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState, renderPaginatedList } from './ui.js';
 
 export async function renderCustomerList(container) {
@@ -531,7 +531,7 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
     if (!dateValue) return toastError('حدد تاريخ الدفعة');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      await db.addPayment({ customerId: customer.id, amount, method, notes: overlay.querySelector('#pay-notes').value.trim(), createdAt: new Date(dateValue).toISOString() });
+      await db.addPayment({ customerId: customer.id, amount, method, notes: overlay.querySelector('#pay-notes').value.trim(), createdAt: combineDateWithCurrentTime(dateValue) });
       closeSheet();
       toastSuccess('تم تسجيل الدفعة وتحديث رصيد الزبون');
       if (onDone) onDone();
@@ -563,7 +563,7 @@ function openAddChargeSheet(customer, onDone) {
     try {
       await db.addManualDebtCharge({
         customerId: customer.id, customerName: customer.name, amount,
-        notes: overlay.querySelector('#charge-notes').value.trim(), createdAt: new Date(dateValue).toISOString()
+        notes: overlay.querySelector('#charge-notes').value.trim(), createdAt: combineDateWithCurrentTime(dateValue)
       });
       closeSheet();
       toastSuccess('تم تسجيل الدين على الزبون');

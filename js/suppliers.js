@@ -2,7 +2,7 @@
 // نظام مستقل تمامًا عن شاشات الزبائن (customers.js): حساب ورصيد وسجل حركات وفواتير خاصة بكل مورد، بدون أي تشارك بينهما
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
-import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, startOfDay, endOfDay, isValidPhone } from './utils.js';
+import { formatMoney, formatDateTime, formatDate, escapeHtml, fuzzyMatch, debounce, startOfDay, endOfDay, isValidPhone, combineDateWithCurrentTime } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog, emptyState, renderPaginatedList } from './ui.js';
 
 export async function renderSupplierList(container) {
@@ -475,7 +475,7 @@ export function openRecordSupplierPaymentSheet(supplier, currentBalance, purchas
     try {
       await db.addSupplierPayment({
         supplierId: supplier.id, amount, method, notes: overlay.querySelector('#sp-notes').value.trim(),
-        createdAt: new Date(dateValue).toISOString(), purchaseId: (purchaseSelect && purchaseSelect.value) || null
+        createdAt: combineDateWithCurrentTime(dateValue), purchaseId: (purchaseSelect && purchaseSelect.value) || null
       });
       closeSheet();
       toastSuccess('تم تسجيل الدفعة وتحديث رصيد المورد');

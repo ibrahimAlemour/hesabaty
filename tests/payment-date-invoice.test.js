@@ -58,14 +58,26 @@ const { withPage, assert, summary } = require('./_harness');
     await page.fill('#sp-amount', '100');
     await page.selectOption('#sp-purchase', { index: 1 }); // أول فاتورة بالقائمة (بعد "غير محدد")
     await page.fill('#sp-date', '2026-01-15');
+    const beforeSpSave = Date.now();
     await page.click('#sp-save');
     await page.waitForTimeout(350);
+    const afterSpSave = Date.now();
 
     const savedSupplierPayment = await page.evaluate(async (supplierId) => {
       const db = await import('./js/database.js');
       return (await db.getSupplierPayments({ supplierId }))[0];
     }, ids.supplierId);
     assert('تاريخ دفعة المورد المُدخَل يدويًا يُحفَظ بشكل صحيح', savedSupplierPayment.created_at.startsWith('2026-01-15'));
+    // الوقت المحفوظ يجب أن يطابق الوقت الفعلي الآن (وليس منتصف الليل UTC) - هذا يثبّت إصلاح باق توقيت "2 صباحًا"
+    const savedTimeOfDayMs = (() => {
+      const d = new Date(savedSupplierPayment.created_at);
+      return ((d.getUTCHours() * 60 + d.getUTCMinutes()) * 60 + d.getUTCSeconds()) * 1000;
+    })();
+    const nowTimeOfDayRange = [beforeSpSave, afterSpSave].map(ms => {
+      const d = new Date(ms);
+      return ((d.getUTCHours() * 60 + d.getUTCMinutes()) * 60 + d.getUTCSeconds()) * 1000;
+    });
+    assert('وقت دفعة المورد المحفوظ يطابق الوقت الفعلي الآن (ليس منتصف الليل)', savedTimeOfDayMs >= nowTimeOfDayRange[0] - 5000 && savedTimeOfDayMs <= nowTimeOfDayRange[1] + 5000);
     assert('الفاتورة المختارة تُربَط فعليًا بالدفعة (purchase_id غير فارغ)', !!savedSupplierPayment.purchase_id);
     assert('الفاتورة المرتبطة هي إحدى الفاتورتين الفعليتين', [ids.p1Id, ids.p2Id].includes(savedSupplierPayment.purchase_id));
 
@@ -96,14 +108,25 @@ const { withPage, assert, summary } = require('./_harness');
 
     await page.fill('#pay-amount', '200');
     await page.fill('#pay-date', '2026-02-20');
+    const beforePaySave = Date.now();
     await page.click('#pay-save');
     await page.waitForTimeout(350);
+    const afterPaySave = Date.now();
 
     const savedCustPayment = await page.evaluate(async (customerId) => {
       const db = await import('./js/database.js');
       return (await db.getPayments({ customerId }))[0];
     }, ids.customerId);
     assert('تاريخ دفعة الزبون المُدخَل يدويًا يُحفَظ بشكل صحيح', savedCustPayment.created_at.startsWith('2026-02-20'));
+    const custSavedTimeOfDayMs = (() => {
+      const d = new Date(savedCustPayment.created_at);
+      return ((d.getUTCHours() * 60 + d.getUTCMinutes()) * 60 + d.getUTCSeconds()) * 1000;
+    })();
+    const custNowTimeOfDayRange = [beforePaySave, afterPaySave].map(ms => {
+      const d = new Date(ms);
+      return ((d.getUTCHours() * 60 + d.getUTCMinutes()) * 60 + d.getUTCSeconds()) * 1000;
+    });
+    assert('وقت دفعة الزبون المحفوظ يطابق الوقت الفعلي الآن (ليس منتصف الليل)', custSavedTimeOfDayMs >= custNowTimeOfDayRange[0] - 5000 && custSavedTimeOfDayMs <= custNowTimeOfDayRange[1] + 5000);
   });
   summary();
 })();

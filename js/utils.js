@@ -37,6 +37,18 @@ export function nowISO() {
   return new Date().toISOString();
 }
 
+// يحوّل قيمة input[type=date] (نص "YYYY-MM-DD" فقط، بدون وقت) إلى ISO كامل بالوقت الحالي الفعلي، لا منتصف
+// الليل. إصلاح جذري: new Date('YYYY-MM-DD') وحدها تُفسَّر كمنتصف ليل UTC (لا منتصف ليل بالتوقيت المحلي)، فبعد
+// عرضها بالتوقيت المحلي (راجع formatDateTime أعلاه) تظهر "2 أو 3 صباحًا" دائمًا مهما كان الوقت الفعلي للعملية -
+// هذا بالضبط ما لاحظه المستخدم بعد إضافة حقول اختيار تاريخ يدوي بدفعات الموردين/الزبائن وإضافة الدين المباشر.
+// نُركّب بدلًا من ذلك نفس يوم/شهر/سنة المُختار، لكن بساعة/دقيقة/ثانية "الآن" الفعلية بالمتصفح - يطابق تمامًا
+// طريقة nowISO() بالأعلى لباقي الطوابع الزمنية بالتطبيق كله (توقيت المتصفح المحلي محوَّلًا لـUTC عند التخزين)
+export function combineDateWithCurrentTime(dateInputValue) {
+  const [y, m, d] = dateInputValue.split('-').map(Number);
+  const now = new Date();
+  return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds()).toISOString();
+}
+
 const TIMEZONE = () => (window.APP_SETTINGS && window.APP_SETTINGS.timezone) || 'Asia/Gaza';
 
 export function formatDate(iso, opts = {}) {

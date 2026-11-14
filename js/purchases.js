@@ -3,7 +3,7 @@
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
 import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, confirmDialog, emptyState, renderPaginatedList } from './ui.js';
-import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS, isValidPhone } from './utils.js';
+import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS, isValidPhone, combineDateWithCurrentTime } from './utils.js';
 import { renderAttachmentsSection } from './attachments.js';
 
 let purchaseState;
@@ -529,8 +529,8 @@ async function completePurchase(container) {
       supplierId: purchaseState.supplier ? purchaseState.supplier.id : null,
       supplierName: purchaseState.supplier ? purchaseState.supplier.name : 'مورد بدون اسم',
       supplierInvoiceNumber: purchaseState.supplierInvoiceNumber,
-      purchaseDate: purchaseState.purchaseDate ? new Date(purchaseState.purchaseDate).toISOString() : undefined,
-      dueDate: credit > 0 && purchaseState.dueDate ? new Date(purchaseState.dueDate).toISOString() : null,
+      purchaseDate: purchaseState.purchaseDate ? combineDateWithCurrentTime(purchaseState.purchaseDate) : undefined,
+      dueDate: credit > 0 && purchaseState.dueDate ? combineDateWithCurrentTime(purchaseState.dueDate) : null,
       items: purchaseState.items,
       discount: purchaseState.discount, extraCosts: purchaseState.extraCosts,
       paidCash: fromCents(cash), paidTransfer: fromCents(transfer), paidCredit: fromCents(credit),

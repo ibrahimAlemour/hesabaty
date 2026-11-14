@@ -27,8 +27,10 @@ const { withPage, assert, summary } = require('./_harness');
 
     await page.fill('#charge-amount', '75');
     await page.fill('#charge-date', '2026-03-10');
+    const beforeChargeSave = Date.now();
     await page.click('#charge-save');
     await page.waitForTimeout(350);
+    const afterChargeSave = Date.now();
 
     const savedDebt = await page.evaluate(async (id) => {
       const db = await import('./js/database.js');
@@ -36,6 +38,16 @@ const { withPage, assert, summary } = require('./_harness');
     }, customerId);
     assert('تاريخ الدين المُدخَل يدويًا يُحفَظ بشكل صحيح', savedDebt.created_at.startsWith('2026-03-10'));
     assert('المبلغ المحفوظ صحيح', savedDebt.paid_debt === 7500);
+    // الوقت المحفوظ يجب أن يطابق الوقت الفعلي الآن (وليس منتصف الليل UTC) - إصلاح باق توقيت "2 صباحًا"
+    const debtTimeOfDayMs = (() => {
+      const d = new Date(savedDebt.created_at);
+      return ((d.getUTCHours() * 60 + d.getUTCMinutes()) * 60 + d.getUTCSeconds()) * 1000;
+    })();
+    const debtNowTimeOfDayRange = [beforeChargeSave, afterChargeSave].map(ms => {
+      const d = new Date(ms);
+      return ((d.getUTCHours() * 60 + d.getUTCMinutes()) * 60 + d.getUTCSeconds()) * 1000;
+    });
+    assert('وقت الدين المحفوظ يطابق الوقت الفعلي الآن (ليس منتصف الليل)', debtTimeOfDayMs >= debtNowTimeOfDayRange[0] - 5000 && debtTimeOfDayMs <= debtNowTimeOfDayRange[1] + 5000);
   });
   summary();
 })();

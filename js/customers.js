@@ -489,6 +489,7 @@ function openSmsDetailSheet(entry) {
 }
 
 export function openRecordPaymentSheet(customer, currentBalance, onDone) {
+  const todayValue = new Date().toISOString().slice(0, 10);
   const overlay = openSheet(`
     <div class="sheet-header"><h3>تسجيل دفعة - ${escapeHtml(customer.name)}</h3></div>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">الرصيد الحالي: <b style="color:var(--danger);">${formatMoney(Math.max(0, currentBalance))}</b></div>
@@ -500,6 +501,7 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
         <div class="pay-method-btn" data-method="transfer"><span class="emoji">📱</span>تحويل</div>
       </div>
     </div>
+    <div class="form-group"><label>تاريخ الدفعة</label><input type="date" id="pay-date" value="${todayValue}"></div>
     <div class="form-group"><label>ملاحظات (اختياري)</label><textarea id="pay-notes"></textarea></div>
     <div id="pay-preview" style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text-muted);"></div>
     <button class="btn btn-primary btn-block" id="pay-save">حفظ الدفعة</button>
@@ -525,9 +527,11 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
     const btn = overlay.querySelector('#pay-save');
     const amount = parseFloat(overlay.querySelector('#pay-amount').value);
     if (!amount || amount <= 0) return toastError('أدخل مبلغًا صحيحًا');
+    const dateValue = overlay.querySelector('#pay-date').value;
+    if (!dateValue) return toastError('حدد تاريخ الدفعة');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      await db.addPayment({ customerId: customer.id, amount, method, notes: overlay.querySelector('#pay-notes').value.trim() });
+      await db.addPayment({ customerId: customer.id, amount, method, notes: overlay.querySelector('#pay-notes').value.trim(), createdAt: new Date(dateValue).toISOString() });
       closeSheet();
       toastSuccess('تم تسجيل الدفعة وتحديث رصيد الزبون');
       if (onDone) onDone();

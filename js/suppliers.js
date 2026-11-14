@@ -254,7 +254,7 @@ export async function renderSupplierDetail(container, supplierId) {
   });
   renderActiveTab('invoices');
 
-  container.querySelector('#record-payment-btn').onclick = () => openRecordSupplierPaymentSheet(supplier, balance, () => renderSupplierDetail(container, supplierId));
+  container.querySelector('#record-payment-btn').onclick = () => openRecordSupplierPaymentSheet(supplier, balance, purchases, () => renderSupplierDetail(container, supplierId));
   container.querySelector('#add-purchase-btn').onclick = () => window.location.hash = `#/purchase/new/${supplier.id}`;
   container.querySelector('#statement-btn').onclick = () => window.location.hash = `#/suppliers/${supplier.id}/statement`;
 
@@ -416,7 +416,12 @@ function closeBtnHtml() {
   return `<button class="icon-btn" data-detail-close title="إغلاق"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
 }
 
-export function openRecordSupplierPaymentSheet(supplier, currentBalance, onDone) {
+// purchases: فواتير شراء هذا المورد (من renderSupplierDetail) - نعرض اختيار فاتورة محدَّدة فقط لو عنده أكثر
+// من فاتورة غير مسدَّدة بالكامل (لا داعي لاختيار من قائمة فيها خيار واحد فقط أو لا خيارات إطلاقًا)؛ اختياري
+// دائمًا (addSupplierPayment يقبل purchaseId=null وهذا هو السلوك الافتراضي الحالي المحفوظ بلا أي تغيير)
+export function openRecordSupplierPaymentSheet(supplier, currentBalance, purchases, onDone) {
+  const unpaidPurchases = (purchases || []).filter(p => p.payment_status !== 'paid');
+  const todayValue = new Date().toISOString().slice(0, 10);
   const overlay = openSheet(`
     <div class="sheet-header"><h3>تسجيل دفعة - ${escapeHtml(supplier.name)}</h3></div>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">المستحق حاليًا: <b style="color:var(--danger);">${formatMoney(Math.max(0, currentBalance))}</b></div>
@@ -429,6 +434,15 @@ export function openRecordSupplierPaymentSheet(supplier, currentBalance, onDone)
         <div class="pay-method-btn" data-method="card"><span class="emoji">💳</span>بطاقة</div>
       </div>
     </div>
+    <div class="form-group"><label>تاريخ الدفعة</label><input type="date" id="sp-date" value="${todayValue}"></div>
+    ${unpaidPurchases.length > 1 ? `
+    <div class="form-group">
+      <label>عن أي فاتورة؟ (اختياري)</label>
+      <select id="sp-purchase">
+        <option value="">غير محدد - خصم عام من رصيد المورد</option>
+        ${unpaidPurchases.map(p => `<option value="${p.id}">${escapeHtml(p.purchase_number)} - ${formatMoney(p.total_amount)} (${formatDate(p.created_at)})</option>`).join('')}
+      </select>
+    </div>` : ''}
     <div class="form-group"><label>ملاحظات (اختياري)</label><textarea id="sp-notes"></textarea></div>
     <div id="sp-preview" style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text-muted);"></div>
     <button class="btn btn-primary btn-block" id="sp-save">حفظ الدفعة</button>
@@ -454,9 +468,15 @@ export function openRecordSupplierPaymentSheet(supplier, currentBalance, onDone)
     const btn = overlay.querySelector('#sp-save');
     const amount = parseFloat(overlay.querySelector('#sp-amount').value);
     if (!amount || amount <= 0) return toastError('أدخل مبلغًا صحيحًا');
+    const dateValue = overlay.querySelector('#sp-date').value;
+    if (!dateValue) return toastError('حدد تاريخ الدفعة');
+    const purchaseSelect = overlay.querySelector('#sp-purchase');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      await db.addSupplierPayment({ supplierId: supplier.id, amount, method, notes: overlay.querySelector('#sp-notes').value.trim() });
+      await db.addSupplierPayment({
+        supplierId: supplier.id, amount, method, notes: overlay.querySelector('#sp-notes').value.trim(),
+        createdAt: new Date(dateValue).toISOString(), purchaseId: (purchaseSelect && purchaseSelect.value) || null
+      });
       closeSheet();
       toastSuccess('تم تسجيل الدفعة وتحديث رصيد المورد');
       if (onDone) onDone();

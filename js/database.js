@@ -762,6 +762,23 @@ export async function getTransfers({ from, to } = {}) {
   return items.sort((a, b) => b.date.localeCompare(a.date));
 }
 
+// ---------- المقبوضات النقدية (مُجمّعة من المبيعات + الدفعات، مرآة getTransfers لكن للنقد) ----------
+export async function getCashReceipts({ from, to } = {}) {
+  const sales = (await getSales({ from, to })).filter(s => s.paid_cash > 0);
+  const payments = (await getPayments({ from, to })).filter(p => p.method === 'cash');
+  const items = [
+    ...sales.map(s => ({
+      id: s.id, source: 'sale', customerName: s.customer_name_snapshot, amount: s.paid_cash,
+      date: s.created_at, notes: `فاتورة ${s.invoice_number}`
+    })),
+    ...payments.map(p => ({
+      id: p.id, source: 'payment', customerName: null, customerId: p.customer_id, amount: p.amount,
+      date: p.created_at, notes: p.notes
+    }))
+  ];
+  return items.sort((a, b) => b.date.localeCompare(a.date));
+}
+
 // ---------- المصروفات ----------
 export async function addExpense({ amount, category, notes, createdAt }) {
   const amountCents = toCents(amount);

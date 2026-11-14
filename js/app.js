@@ -14,6 +14,7 @@ import { renderInventory } from './inventory.js';
 import { renderCategories } from './categories.js';
 import { renderSms } from './sms.js';
 import { renderTransfers } from './transfers.js';
+import { renderCashReceipts } from './cash-receipts.js';
 import { renderExpenses } from './expenses.js';
 import { renderCash } from './cash.js';
 import { renderReports } from './reports.js';
@@ -71,6 +72,7 @@ const MORE_ITEMS = [
   { path: '#/purchases', label: 'فواتير المشتريات', icon: '🧾' },
   { path: '#/sms', label: 'رسائل SMS', icon: '✉️' },
   { path: '#/transfers', label: 'التحويلات', icon: '📱' },
+  { path: '#/cash-receipts', label: 'المقبوضات النقدية', icon: '💵' },
   { path: '#/expenses', label: 'المصروفات', icon: '💸' },
   { path: '#/cash', label: 'الصندوق', icon: '💰' },
   { path: '#/settings', label: 'الإعدادات', icon: '⚙️' }
@@ -97,6 +99,7 @@ const ROUTES = [
   { pattern: /^#\/purchase\/([\w-]+)$/, title: 'فاتورة الشراء', showBack: true, render: (m) => renderPurchaseInvoice(appContent, m[1]) },
   { pattern: /^#\/sms$/, title: 'رسائل SMS', showBack: true, render: () => renderSms(appContent) },
   { pattern: /^#\/transfers$/, title: 'التحويلات', showBack: true, render: () => renderTransfers(appContent) },
+  { pattern: /^#\/cash-receipts$/, title: 'المقبوضات النقدية', showBack: true, render: () => renderCashReceipts(appContent) },
   { pattern: /^#\/expenses$/, title: 'المصروفات', showBack: true, render: () => renderExpenses(appContent) },
   { pattern: /^#\/cash$/, title: 'الصندوق', showBack: true, render: () => renderCash(appContent) },
   { pattern: /^#\/reports$/, title: 'التقارير', render: () => renderReports(appContent) },

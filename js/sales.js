@@ -114,6 +114,9 @@ function renderItemsList() {
   if (!saleState.items.length) return emptyState('🛒', 'لم تُضف منتجات بعد', 'اختر منتجًا من الأعلى للبدء');
   return saleState.items.map((it, idx) => {
     const hasQty = it.quantity !== '' && it.quantity != null;
+    // نعرض الوزن مقرَّبًا لـ3 خانات عشرية فقط لغرض العرض، لكن نحتفظ بالقيمة الكاملة الدقة بـit.quantity نفسها
+    // كي لا يتغيّر إجمالي المنتج المُدخَل يدويًا من الميزان (بعد كل إعادة رسم كإضافة منتج آخر مثلًا)
+    const displayQty = hasQty ? Math.round(it.quantity * 1000) / 1000 : '';
     const totalValue = hasQty ? fromCents(Math.round(toCents(it.selling_price) * it.quantity)) : '';
     return `
     <div class="sale-item-row" data-idx="${idx}" style="flex-direction:column;align-items:stretch;gap:8px;">
@@ -124,7 +127,7 @@ function renderItemsList() {
         </button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${it.quantity}" placeholder="الوزن" step="0.1" min="0.01" style="width:78px;padding:11px 8px;font-size:15.5px;" title="الكمية">
+        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${displayQty}" placeholder="الوزن" step="0.1" min="0.01" style="width:78px;padding:11px 8px;font-size:15.5px;" title="الكمية">
         <span class="prod-meta">${it.unit} ×</span>
         <input type="number" inputmode="decimal" class="item-price" data-idx="${idx}" value="${fromCents(toCents(it.selling_price))}" step="0.5" min="0" style="width:78px;padding:11px 8px;font-size:15.5px;" title="سعر الكيلو">
         <span class="prod-meta">₪ =</span>
@@ -175,12 +178,14 @@ function updateRowTotal(container, idx) {
 }
 
 // عند تعديل الإجمالي (السعر من الميزان): نعيد حساب الكمية بالعكس = Total ÷ Price
+// نحتفظ بكامل دقة القسمة بـit.quantity (لا تقريب) حتى يُعيد السعر × الكمية نفس الإجمالي المُدخَل بالضبط
+// عند أي إعادة حساب لاحقة (كإضافة منتج آخر) - نقرّب فقط القيمة المعروضة بحقل الوزن
 function updateRowQuantityFromTotal(container, idx, totalValue) {
   const row = container.querySelector(`.sale-item-row[data-idx="${idx}"]`);
   const it = saleState.items[idx];
   if (it.selling_price > 0) {
-    it.quantity = Math.round((totalValue / it.selling_price) * 1000) / 1000;
-    row.querySelector('.item-qty').value = it.quantity;
+    it.quantity = totalValue / it.selling_price;
+    row.querySelector('.item-qty').value = Math.round(it.quantity * 1000) / 1000;
   }
   updateGrandTotal(container);
 }

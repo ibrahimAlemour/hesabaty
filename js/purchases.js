@@ -198,6 +198,9 @@ function renderItemsList() {
   if (!purchaseState.items.length) return emptyState('📦', 'لم تُضف منتجات بعد', 'اضغط "+ إضافة منتج" للبدء');
   return purchaseState.items.map((it, idx) => {
     const hasQty = it.quantity !== '' && it.quantity != null;
+    // نعرض الكمية مقرَّبة لـ3 خانات عشرية فقط لغرض العرض، لكن نحتفظ بالقيمة الكاملة الدقة بـit.quantity نفسها
+    // كي لا يتغيّر إجمالي المنتج المُدخَل يدويًا من الميزان (بعد كل إعادة رسم كإضافة منتج آخر مثلًا)
+    const displayQty = hasQty ? Math.round(it.quantity * 1000) / 1000 : '';
     const totalValue = hasQty ? fromCents(Math.round(toCents(it.purchase_price) * it.quantity)) : '';
     return `
     <div class="sale-item-row" data-idx="${idx}" style="flex-direction:column;align-items:stretch;gap:8px;">
@@ -208,7 +211,7 @@ function renderItemsList() {
         </button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${it.quantity}" placeholder="الكمية" step="0.1" min="0.01" style="width:78px;padding:11px 8px;font-size:15.5px;" title="الكمية">
+        <input type="number" inputmode="decimal" class="item-qty" data-idx="${idx}" value="${displayQty}" placeholder="الكمية" step="0.1" min="0.01" style="width:78px;padding:11px 8px;font-size:15.5px;" title="الكمية">
         <span class="prod-meta">${it.unit} ×</span>
         <input type="number" inputmode="decimal" class="item-price" data-idx="${idx}" value="${fromCents(toCents(it.purchase_price))}" step="0.5" min="0" style="width:78px;padding:11px 8px;font-size:15.5px;" title="سعر الشراء">
         <span class="prod-meta">₪ =</span>
@@ -263,12 +266,14 @@ function updateRowTotal(container, idx) {
   updateTotals(container);
 }
 
+// نحتفظ بكامل دقة القسمة بـit.quantity (لا تقريب) حتى يُعيد السعر × الكمية نفس الإجمالي المُدخَل بالضبط
+// عند أي إعادة حساب لاحقة (كإضافة منتج آخر) - نقرّب فقط القيمة المعروضة بحقل الكمية
 function updateRowQuantityFromTotal(container, idx, totalValue) {
   const row = container.querySelector(`.sale-item-row[data-idx="${idx}"]`);
   const it = purchaseState.items[idx];
   if (it.purchase_price > 0) {
-    it.quantity = Math.round((totalValue / it.purchase_price) * 1000) / 1000;
-    row.querySelector('.item-qty').value = it.quantity;
+    it.quantity = totalValue / it.purchase_price;
+    row.querySelector('.item-qty').value = Math.round(it.quantity * 1000) / 1000;
   }
   updateTotals(container);
 }

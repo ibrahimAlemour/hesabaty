@@ -8,7 +8,7 @@ import { renderSetupWizard } from './setup.js';
 import { renderLogin } from './login.js';
 import { renderDashboard } from './dashboard.js';
 import { renderNewSale, renderEditSale } from './sales.js';
-import { renderCustomerList, renderCustomerDetail, renderCustomerStatement } from './customers.js';
+import { renderCustomerList, renderCustomerDetail, renderCustomerStatement, renderCustomersReport, openCustomerReportsSheet } from './customers.js';
 import { renderProductList } from './products.js';
 import { renderInventory } from './inventory.js';
 import { renderCategories } from './categories.js';
@@ -34,6 +34,7 @@ import './pwa-install.js';
 const appContent = document.getElementById('app-content');
 const headerTitle = document.getElementById('header-title');
 const backBtn = document.getElementById('back-btn');
+const customersPrintBtn = document.getElementById('customers-print-btn');
 // معرّف المحل الذي سُحبت بياناته الكاملة فعليًا بهذه الجلسة البرمجية - نتتبّع shop_id نفسه لا مجرّد "تم/لم يتم"،
 // حتى تُعاد عملية السحب تلقائيًا فور تبديل المحل (تسجيل خروج من محل ودخول بمحل آخر على نفس الجهاز/الجلسة)، بدل
 // أن يبقى علَم "مرة واحدة فقط" عالقًا من المحل السابق فتظهر شاشة فارغة تمامًا للمحل الجديد بعد مسح بياناته المحلية
@@ -82,7 +83,8 @@ const ROUTES = [
   { pattern: /^#\/dashboard$/, title: 'حساباتي', render: (m, isCashier) => isCashier ? renderCashierHome(appContent) : renderDashboard(appContent) },
   { pattern: /^#\/sale\/new$/, title: 'بيع جديد', showBack: true, render: () => renderNewSale(appContent) },
   { pattern: /^#\/sale\/edit\/([\w-]+)$/, title: 'تعديل الفاتورة', showBack: true, render: (m) => renderEditSale(appContent, m[1]) },
-  { pattern: /^#\/customers$/, title: 'الزبائن', render: (m, isCashier) => isCashier ? renderCashierCustomerList(appContent) : renderCustomerList(appContent) },
+  { pattern: /^#\/customers$/, title: 'الزبائن', showCustomersPrint: true, render: (m, isCashier) => isCashier ? renderCashierCustomerList(appContent) : renderCustomerList(appContent) },
+  { pattern: /^#\/customers\/report\/(all|debtors|creditors)$/, title: 'كشوف الزبائن', showBack: true, render: (m) => renderCustomersReport(appContent, m[1]) },
   { pattern: /^#\/customers\/([\w-]+)$/, title: 'حساب الزبون', showBack: true, render: (m, isCashier) => isCashier ? renderCashierCustomerDetail(appContent, m[1]) : renderCustomerDetail(appContent, m[1]) },
   { pattern: /^#\/customers\/([\w-]+)\/statement$/, title: 'كشف حساب الزبون', showBack: true, render: (m) => renderCustomerStatement(appContent, m[1]) },
   { pattern: /^#\/products$/, title: 'المنتجات', showBack: true, render: () => renderProductList(appContent) },
@@ -241,6 +243,12 @@ async function router() {
     if (m) {
       headerTitle.textContent = route.title;
       backBtn.style.display = route.showBack ? 'flex' : 'none';
+      // طباعة كشوف الزبائن: ميزة محاسبية لصاحب المحل فقط (مثل عرض الأرباح وباقي شاشات الإدارة المالية)،
+      // تظهر فقط بشاشة قائمة الزبائن نفسها لا بأي شاشة فرعية أخرى
+      if (customersPrintBtn) {
+        customersPrintBtn.style.display = (route.showCustomersPrint && !isCashier) ? 'flex' : 'none';
+        customersPrintBtn.onclick = () => openCustomerReportsSheet();
+      }
       try {
         await route.render(m, isCashier);
       } catch (err) {

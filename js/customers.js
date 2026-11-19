@@ -465,6 +465,126 @@ export async function renderCustomerStatement(container, customerId, range) {
   };
 }
 
+// ---------- كشوف الزبائن الجماعية (جميع/مدينون/دائنون) - للطباعة ----------
+const CUSTOMERS_REPORT_TYPES = {
+  all: { title: 'كشف جميع الزبائن', subtitle: 'كل الزبائن المسجَّلين بأرصدتهم الحالية', icon: '👥', color: 'var(--blue)', bg: 'var(--blue-light)' },
+  debtors: { title: 'كشف الزبائن المدينين', subtitle: 'الزبائن الذين عليهم مبالغ مستحقة فقط', icon: '📝', color: 'var(--danger)', bg: 'var(--danger-light)' },
+  creditors: { title: 'كشف الزبائن الدائنين', subtitle: 'الزبائن الذين لهم رصيد لدى المحل فقط', icon: '💰', color: 'var(--success)', bg: 'var(--success-light)' }
+};
+
+export function openCustomerReportsSheet() {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>كشوف الزبائن</h3>${closeBtnHtml()}</div>
+    ${Object.entries(CUSTOMERS_REPORT_TYPES).map(([type, m]) => `
+      <div class="list-item" style="cursor:pointer;" data-report-type="${type}">
+        <div class="avatar" style="background:${m.bg};color:${m.color};">${m.icon}</div>
+        <div class="info">
+          <div class="title">${m.title}</div>
+          <div class="subtitle">${m.subtitle}</div>
+        </div>
+      </div>`).join('')}
+  `);
+  overlay.querySelector('[data-detail-close]').onclick = closeSheet;
+  overlay.querySelectorAll('[data-report-type]').forEach(el => el.onclick = () => {
+    closeSheet();
+    window.location.hash = `#/customers/report/${el.dataset.reportType}`;
+  });
+}
+
+// جلب مباشر من قاعدة البيانات عبر getCustomersWithBalance (كل الزبائن دفعة واحدة، بلا أي ترقيم صفحات/حد أقصى،
+// ومحصورة بالمحل الحالي تلقائيًا كبقية التطبيق) - ونفس getCustomerBalance المعتمدة بكل شاشات الزبون الأخرى،
+// فتصنيف مدين/دائن هنا يطابق تمامًا ما يظهر برصيد كل زبون بصفحته - لا يُعاد حساب الرصيد بمنطق منفصل
+export async function renderCustomersReport(container, type) {
+  container.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
+  const reportMeta = CUSTOMERS_REPORT_TYPES[type] || CUSTOMERS_REPORT_TYPES.all;
+  const [allCustomers, settings] = await Promise.all([db.getCustomersWithBalance(), db.getSettings()]);
+
+  const rows = type === 'debtors' ? allCustomers.filter(c => c.balance > 0)
+    : type === 'creditors' ? allCustomers.filter(c => c.balance < 0)
+    : allCustomers; // "الكل": يشمل حتى أصحاب الرصيد صفر عمدًا (بخلاف المدينين/الدائنين)
+
+  const totalDebt = allCustomers.filter(c => c.balance > 0).reduce((s, c) => s + c.balance, 0);
+  const totalCredit = allCustomers.filter(c => c.balance < 0).reduce((s, c) => s + Math.abs(c.balance), 0);
+  const issuedAt = formatDateTime(new Date().toISOString());
+  const balanceColHead = type === 'debtors' ? 'المبلغ المستحق' : type === 'creditors' ? 'الرصيد الدائن' : 'الرصيد الحالي';
+
+  function balanceCell(c) {
+    if (type === 'debtors') return `<td style="color:var(--danger);font-weight:700;">${formatMoney(c.balance)}</td>`;
+    if (type === 'creditors') return `<td style="color:var(--success);font-weight:700;">${formatMoney(Math.abs(c.balance))}</td>`;
+    if (c.balance > 0) return `<td style="color:var(--danger);font-weight:700;">${formatMoney(c.balance)}</td>`;
+    if (c.balance < 0) return `<td style="color:var(--success);font-weight:700;">${formatMoney(Math.abs(c.balance))}</td>`;
+    return `<td style="color:var(--text-muted);font-weight:700;">${formatMoney(0)}</td>`;
+  }
+
+  // صفوف رأس الجدول مدمجة داخل thead عمدًا (كنفس تقنية كشف حساب الزبون/المورد) لتتكرر تلقائيًا بأعلى كل صفحة مطبوعة
+  function headerRowsHtml() {
+    return `
+      <tr class="stmt-head-row"><th colspan="4" style="text-align:center;font-size:18px;font-weight:800;border:none;padding-bottom:2px;">${escapeHtml(settings.shopName)}</th></tr>
+      ${settings.phone || settings.address ? `<tr class="stmt-head-row"><th colspan="4" style="text-align:center;font-weight:400;font-size:12px;color:var(--text-muted);border:none;padding-top:0;padding-bottom:10px;">${escapeHtml(settings.phone || '')}${settings.address ? ' - ' + escapeHtml(settings.address) : ''}</th></tr>` : ''}
+      <tr class="stmt-head-row"><th colspan="4" style="text-align:center;font-weight:800;font-size:15px;border:none;padding-bottom:4px;">${reportMeta.title}</th></tr>
+      <tr class="stmt-head-row"><th colspan="4" style="text-align:center;font-weight:400;font-size:12px;color:var(--text-muted);border-bottom:1.5px solid var(--border);padding-bottom:10px;">تاريخ ووقت الاستخراج: ${issuedAt}</th></tr>
+      <tr class="stmt-col-head">
+        <th style="width:36px;">#</th><th>اسم الزبون</th><th>رقم الهاتف</th><th>${balanceColHead}</th>
+      </tr>`;
+  }
+
+  const summaryHtml = type === 'debtors'
+    ? `<div class="row"><span>عدد الزبائن المدينين</span><span>${rows.length}</span></div>
+       <div class="row"><span>إجمالي المبالغ المستحقة</span><span style="color:var(--danger);font-weight:800;">${formatMoney(totalDebt)}</span></div>`
+    : type === 'creditors'
+    ? `<div class="row"><span>عدد الزبائن الدائنين</span><span>${rows.length}</span></div>
+       <div class="row"><span>إجمالي الأرصدة الدائنة</span><span style="color:var(--success);font-weight:800;">${formatMoney(totalCredit)}</span></div>`
+    : `<div class="row"><span>إجمالي عدد الزبائن</span><span>${rows.length}</span></div>
+       <div class="row"><span>إجمالي المبالغ المستحقة على الزبائن</span><span style="color:var(--danger);font-weight:800;">${formatMoney(totalDebt)}</span></div>
+       <div class="row"><span>إجمالي الأرصدة الدائنة للزبائن</span><span style="color:var(--success);font-weight:800;">${formatMoney(totalCredit)}</span></div>`;
+
+  const emptyLabel = type === 'debtors' ? 'لا يوجد زبائن مدينون حاليًا' : type === 'creditors' ? 'لا يوجد زبائن دائنون حاليًا' : 'لا يوجد زبائن مسجَّلون';
+
+  container.innerHTML = `
+    <div class="card" id="customers-report-card">
+      <table class="simple-table stmt-table">
+        <thead>${headerRowsHtml()}</thead>
+        <tbody>
+          ${rows.length ? rows.map((c, idx) => `
+            <tr>
+              <td>${idx + 1}</td>
+              <td>${escapeHtml(c.name)}</td>
+              <td>${c.phone ? escapeHtml(c.phone) : '—'}</td>
+              ${balanceCell(c)}
+            </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;padding:24px 8px;color:var(--text-muted);">${emptyLabel}</td></tr>`}
+        </tbody>
+      </table>
+
+      <div class="totals-box" style="margin-top:16px;">${summaryHtml}</div>
+
+      <div class="print-only" style="position:fixed;bottom:0;left:0;right:0;text-align:center;font-size:11px;color:#888;padding:6px 0;border-top:1px solid #ddd;background:#fff;">
+        ${escapeHtml(settings.shopName)} - تاريخ الإصدار: ${issuedAt}
+      </div>
+    </div>
+
+    <div class="no-print" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+      <button class="btn btn-secondary" id="cr-print">🖨️ طباعة</button>
+      <button class="btn btn-secondary" id="cr-pdf">📄 حفظ PDF</button>
+      <button class="btn btn-outline" id="cr-back">↩️ تغيير نوع الكشف</button>
+      <button class="btn btn-outline" id="cr-close">✖️ إغلاق</button>
+    </div>
+  `;
+
+  container.querySelector('#cr-print').onclick = () => {
+    const originalTitle = document.title;
+    document.title = `${reportMeta.title} - ${settings.shopName}`;
+    const restoreTitle = () => { document.title = originalTitle; window.removeEventListener('afterprint', restoreTitle); };
+    window.addEventListener('afterprint', restoreTitle);
+    window.print();
+  };
+  container.querySelector('#cr-pdf').onclick = () => {
+    toastSuccess('استخدم خيار "حفظ كـ PDF" من نافذة الطباعة');
+    window.print();
+  };
+  container.querySelector('#cr-back').onclick = () => openCustomerReportsSheet();
+  container.querySelector('#cr-close').onclick = () => { window.location.hash = '#/customers'; };
+}
+
 function openLedgerDetailSheet(entry) {
   const isDebt = entry.direction === 'debt';
   const overlay = openSheet(`

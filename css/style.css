@@ -57,6 +57,8 @@ ul { margin: 0; padding: 0; list-style: none; }
   cursor: pointer;
 }
 .icon-btn:active { background: var(--bg); }
+.icon-btn-accent { background: var(--success-light); color: var(--success); border-radius: var(--radius-sm); }
+.icon-btn-accent:active { background: var(--success-light); opacity: .75; }
 #sync-status-btn.sync-synced { color: var(--success); }
 #sync-status-btn.sync-pending { color: var(--warning); }
 #sync-status-btn.sync-offline { color: var(--text-muted); }
@@ -317,7 +319,10 @@ table.simple-table th { color: var(--text-muted); font-weight: 700; font-size: 1
   .stmt-table { font-size: 14px; }
   .stmt-table th, .stmt-table td { padding: 10px 8px; }
   .stmt-table .stmt-head-row th:first-child { font-size: 20px !important; }
+  /* لا يُسمح بانقسام بيانات صف واحد (زبون/مورد/حركة) بين صفحتين مطبوعتين */
+  .stmt-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
 }
+@page { size: A4; margin: 14mm 10mm; }
 
 .customer-select-list { max-height: 40vh; overflow-y: auto; }
 .link-btn { background: none; border: none; color: var(--primary); font-weight: 700; font-size: 13.5px; cursor: pointer; padding: 6px 0; }

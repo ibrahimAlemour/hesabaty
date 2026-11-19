@@ -447,12 +447,14 @@ export async function deleteCustomer(id) {
 }
 
 // رصيد الزبون = إجمالي حصص الدين من المبيعات - إجمالي الدفعات (يُعاد حسابه دائمًا من السجل)
+// paidTotal يشمل الخصم الممنوح عند تحصيل الدفعة (discount) تمامًا كالمبلغ الفعلي - كلاهما يُخفّض الدين،
+// لكن discount فقط لا يدخل الصندوق (راجع addPayment: لا تُنشأ حركة cashTransactions إلا بقيمة amount)
 export async function getCustomerBalance(customerId) {
   if (!customerId) return 0;
   const sales = await localDb.getByIndex('sales', 'customer_id', customerId);
   const payments = await localDb.getByIndex('payments', 'customer_id', customerId);
   const debtTotal = sales.filter(s => !s.is_deleted).reduce((sum, s) => sum + (s.paid_debt || 0), 0);
-  const paidTotal = payments.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.amount || 0), 0);
+  const paidTotal = payments.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.amount || 0) + (p.discount || 0), 0);
   return debtTotal - paidTotal;
 }
 
@@ -499,10 +501,10 @@ export async function getCustomerLedger(customerId) {
       direction: 'debt', notes: s.notes
     })),
     ...payments.map(p => ({
-      type: 'payment', id: p.id, date: p.created_at, amount: p.amount,
+      type: 'payment', id: p.id, date: p.created_at, amount: p.amount + (p.discount || 0),
       label: p.method === 'cash' ? 'دفعة نقدية' : 'دفعة تحويل',
       description: p.method === 'cash' ? 'دفعة نقدية' : 'دفعة تحويل', reference: null,
-      direction: 'payment', notes: p.notes
+      direction: 'payment', notes: p.notes, collectedAmount: p.amount, discount: p.discount || 0
     }))
   ];
   return entries.sort((a, b) => b.date.localeCompare(a.date));
@@ -706,18 +708,22 @@ export async function deleteSale(id) {
 }
 
 // ---------- الدفعات (تحصيل الديون) ----------
-export async function addPayment({ customerId, amount, method, referenceNumber, bankName, notes, createdAt }) {
+// discount: مبلغ يُخفَّض من دين الزبون دون أن يدخل الصندوق فعليًا (خصم/تنازل عند التحصيل) - يُحتسب بالرصيد
+// تمامًا كالمبلغ المحصَّل (getCustomerBalance) لكن لا يُنشئ حركة صندوق (cashTransactions تبقى بقيمة amount فقط)
+export async function addPayment({ customerId, amount, discount, method, referenceNumber, bankName, notes, createdAt }) {
   if (!customerId) throw new Error('يجب اختيار زبون');
-  const amountCents = toCents(amount);
-  if (amountCents <= 0) throw new Error('أدخل مبلغًا صحيحًا');
+  const amountCents = toCents(amount || 0);
+  const discountCents = toCents(discount || 0);
+  if (amountCents < 0 || discountCents < 0) throw new Error('لا يمكن إدخال مبلغ سالب');
+  if (amountCents <= 0 && discountCents <= 0) throw new Error('أدخل مبلغًا أو خصمًا صحيحًا');
   const record = {
-    id: uuid(), customer_id: customerId, sale_id: null, amount: amountCents,
+    id: uuid(), customer_id: customerId, sale_id: null, amount: amountCents, discount: discountCents,
     method: method === 'transfer' ? 'transfer' : 'cash',
     reference_number: referenceNumber || '', bank_name: bankName || '', notes: notes || '',
     is_deleted: false, created_at: createdAt || nowISO()
   };
   await writeRecord('payments', record);
-  if (record.method === 'cash') {
+  if (record.method === 'cash' && amountCents > 0) {
     await writeRecord('cashTransactions', {
       id: uuid(), type: 'payment_cash', amount: amountCents, reference_type: 'payment', reference_id: record.id,
       notes: 'تحصيل دين نقدي', created_at: record.created_at
@@ -858,12 +864,13 @@ export async function deleteSupplier(id) {
 }
 
 // رصيد المورد = ما يدين به المحل له = إجمالي الآجل من فواتير الشراء - إجمالي الدفعات المسجّلة له (يُعاد حسابه دائمًا من السجل)
+// discount بدفعة المورد = خصم يمنحه المورد عند التحصيل فيُخفّض المستحق له دون خروج مبلغ فعلي من الصندوق
 export async function getSupplierBalance(supplierId) {
   if (!supplierId) return 0;
   const purchases = await localDb.getByIndex('purchases', 'supplier_id', supplierId);
   const payments = await localDb.getByIndex('supplierPayments', 'supplier_id', supplierId);
   const owedTotal = purchases.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.paid_credit || 0), 0);
-  const paidTotal = payments.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.amount || 0), 0);
+  const paidTotal = payments.filter(p => !p.is_deleted).reduce((sum, p) => sum + (p.amount || 0) + (p.discount || 0), 0);
   return owedTotal - paidTotal;
 }
 
@@ -875,7 +882,7 @@ export async function getSuppliersWithBalance() {
     const balance = await getSupplierBalance(s.id);
     const totalPurchases = purchases.reduce((sum, p) => sum + (p.total_amount || 0), 0);
     const totalPaid = purchases.reduce((sum, p) => sum + (p.paid_cash || 0) + (p.paid_transfer || 0), 0)
-      + payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+      + payments.reduce((sum, p) => sum + (p.amount || 0) + (p.discount || 0), 0);
     const lastInvoiceDate = purchases.reduce((max, p) => (!max || p.created_at > max ? p.created_at : max), null);
     return { ...s, balance, totalPurchases, totalPaid, lastInvoiceDate };
   }));
@@ -895,10 +902,10 @@ export async function getSupplierLedger(supplierId) {
       direction: 'debt', notes: p.notes
     })),
     ...payments.map(p => ({
-      type: 'supplier_payment', id: p.id, date: p.created_at, amount: p.amount,
+      type: 'supplier_payment', id: p.id, date: p.created_at, amount: p.amount + (p.discount || 0),
       label: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة', description: SUPPLIER_PAYMENT_METHOD_LABELS[p.method] || 'دفعة',
       reference: p.payment_number || null, // دفعات مسجَّلة قبل إضافة هذا الترقيم تبقى بدون مرجع (—) بدل ترقيم رجعي غير حقيقي
-      direction: 'payment', notes: p.notes
+      direction: 'payment', notes: p.notes, collectedAmount: p.amount, discount: p.discount || 0
     }))
   ];
   return entries.sort((a, b) => b.date.localeCompare(a.date));
@@ -1079,20 +1086,24 @@ export async function deletePurchase(id) {
 }
 
 // ---------- دفعات الموردين ----------
-export async function addSupplierPayment({ supplierId, purchaseId, amount, method, notes, createdAt }) {
+// discount: خصم يمنحه المورد عند تحصيل الدفعة فيُخفّض المستحق له دون أن يخرج مبلغ فعلي من الصندوق
+// (راجع نفس المنطق بـaddPayment لدفعات الزبائن)
+export async function addSupplierPayment({ supplierId, purchaseId, amount, discount, method, notes, createdAt }) {
   return withSupplierPaymentLock(async () => {
     if (!supplierId) throw new Error('يجب اختيار مورد');
-    const amountCents = toCents(amount);
-    if (amountCents <= 0) throw new Error('أدخل مبلغًا صحيحًا');
+    const amountCents = toCents(amount || 0);
+    const discountCents = toCents(discount || 0);
+    if (amountCents < 0 || discountCents < 0) throw new Error('لا يمكن إدخال مبلغ سالب');
+    if (amountCents <= 0 && discountCents <= 0) throw new Error('أدخل مبلغًا أو خصمًا صحيحًا');
     const { number, label } = await nextSupplierPaymentLabel();
     const record = {
       id: uuid(), payment_number: label, payment_seq: number,
-      supplier_id: supplierId, purchase_id: purchaseId || null, amount: amountCents,
+      supplier_id: supplierId, purchase_id: purchaseId || null, amount: amountCents, discount: discountCents,
       method: ['cash', 'transfer', 'card'].includes(method) ? method : 'cash',
       notes: notes || '', is_deleted: false, created_at: createdAt || nowISO()
     };
     await writeRecord('supplierPayments', record);
-    if (record.method === 'cash') {
+    if (record.method === 'cash' && amountCents > 0) {
       await writeRecord('cashTransactions', {
         id: uuid(), type: 'supplier_payment_cash', amount: -amountCents, reference_type: 'supplier_payment', reference_id: record.id,
         notes: 'دفعة نقدية لمورد', created_at: record.created_at

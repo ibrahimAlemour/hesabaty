@@ -166,7 +166,7 @@ export async function renderSupplierDetail(container, supplierId) {
       <div class="list-item">
         <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
         <div class="info">
-          <div class="title">${escapeHtml(entry.label)}</div>
+          <div class="title">${escapeHtml(entry.label)}${entry.discount ? ` <span style="color:var(--warning);font-weight:700;">(شاملة خصم ${formatMoney(entry.discount)})</span>` : ''}</div>
           <div class="subtitle">${formatDateTime(entry.date)}</div>
         </div>
         <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
@@ -434,6 +434,9 @@ export function openRecordSupplierPaymentSheet(supplier, currentBalance, purchas
         <div class="pay-method-btn" data-method="card"><span class="emoji">💳</span>بطاقة</div>
       </div>
     </div>
+    <div class="form-group"><label>خصم (اختياري)</label><input type="number" id="sp-discount" step="0.5" min="0" placeholder="0">
+      <p style="font-size:12px;color:var(--text-muted);margin:4px 0 0;">يُخفَّض من المستحق للمورد دون إضافته للصندوق (تنازل عند التحصيل)</p>
+    </div>
     <div class="form-group"><label>تاريخ الدفعة</label><input type="date" id="sp-date" value="${todayValue}"></div>
     ${unpaidPurchases.length > 1 ? `
     <div class="form-group">
@@ -457,24 +460,27 @@ export function openRecordSupplierPaymentSheet(supplier, currentBalance, purchas
 
   const updatePreview = () => {
     const amount = Math.round((parseFloat(overlay.querySelector('#sp-amount').value) || 0) * 100);
-    const newBalance = currentBalance - amount;
-    overlay.querySelector('#sp-preview').innerHTML = amount > 0
-      ? `الرصيد الجديد بعد الدفعة: <span style="color:${newBalance > 0 ? 'var(--danger)' : 'var(--success)'};">${formatMoney(Math.abs(newBalance))}</span>`
+    const discount = Math.round((parseFloat(overlay.querySelector('#sp-discount').value) || 0) * 100);
+    const newBalance = currentBalance - amount - discount;
+    overlay.querySelector('#sp-preview').innerHTML = (amount > 0 || discount > 0)
+      ? `الرصيد الجديد بعد الدفعة${discount > 0 ? ' والخصم' : ''}: <span style="color:${newBalance > 0 ? 'var(--danger)' : 'var(--success)'};">${formatMoney(Math.abs(newBalance))}</span>`
       : '';
   };
   overlay.querySelector('#sp-amount').oninput = updatePreview;
+  overlay.querySelector('#sp-discount').oninput = updatePreview;
 
   overlay.querySelector('#sp-save').onclick = async () => {
     const btn = overlay.querySelector('#sp-save');
-    const amount = parseFloat(overlay.querySelector('#sp-amount').value);
-    if (!amount || amount <= 0) return toastError('أدخل مبلغًا صحيحًا');
+    const amount = parseFloat(overlay.querySelector('#sp-amount').value) || 0;
+    const discount = parseFloat(overlay.querySelector('#sp-discount').value) || 0;
+    if (amount <= 0 && discount <= 0) return toastError('أدخل مبلغًا أو خصمًا صحيحًا');
     const dateValue = overlay.querySelector('#sp-date').value;
     if (!dateValue) return toastError('حدد تاريخ الدفعة');
     const purchaseSelect = overlay.querySelector('#sp-purchase');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
       await db.addSupplierPayment({
-        supplierId: supplier.id, amount, method, notes: overlay.querySelector('#sp-notes').value.trim(),
+        supplierId: supplier.id, amount, discount, method, notes: overlay.querySelector('#sp-notes').value.trim(),
         createdAt: combineDateWithCurrentTime(dateValue), purchaseId: (purchaseSelect && purchaseSelect.value) || null
       });
       closeSheet();

@@ -303,7 +303,7 @@ function ledgerRow(entry, canManage) {
     <div class="list-item" style="cursor:pointer;" data-ledger-open="${entry.type}:${entry.id}">
       <div class="avatar" style="background:${isDebt ? 'var(--danger-light)' : 'var(--success-light)'};color:${isDebt ? 'var(--danger)' : 'var(--success)'};">${isDebt ? '📝' : '💵'}</div>
       <div class="info">
-        <div class="title">${escapeHtml(entry.label)}</div>
+        <div class="title">${escapeHtml(entry.label)}${entry.discount ? ` <span style="color:var(--warning);font-weight:700;">(شاملة خصم ${formatMoney(entry.discount)})</span>` : ''}</div>
         <div class="subtitle">${formatDateTime(entry.date)}</div>
       </div>
       <div class="amount ${isDebt ? 'debt' : 'cash'}">${isDebt ? '+' : '-'}${formatMoney(entry.amount)}</div>
@@ -474,6 +474,9 @@ function openLedgerDetailSheet(entry) {
       <div class="meta">${isDebt ? 'دين مسجّل على الزبون' : 'دفعة من الزبون'}</div>
     </div>
     <div class="form-group"><label>الوصف</label><p style="margin:4px 0;">${escapeHtml(entry.label)}</p></div>
+    ${entry.discount ? `
+    <div class="form-group"><label>المبلغ المحصَّل فعليًا</label><p style="margin:4px 0;">${formatMoney(entry.collectedAmount)}</p></div>
+    <div class="form-group"><label>الخصم الممنوح</label><p style="margin:4px 0;color:var(--warning);font-weight:700;">${formatMoney(entry.discount)}</p></div>` : ''}
     <div class="form-group"><label>التاريخ والوقت</label><p style="margin:4px 0;">${formatDateTime(entry.date)}</p></div>
     ${entry.notes ? `<div class="form-group"><label>ملاحظات</label><p style="margin:4px 0;">${escapeHtml(entry.notes)}</p></div>` : ''}
   `);
@@ -506,6 +509,9 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
         <div class="pay-method-btn" data-method="transfer"><span class="emoji">📱</span>تحويل</div>
       </div>
     </div>
+    <div class="form-group"><label>خصم (اختياري)</label><input type="number" id="pay-discount" step="0.5" min="0" placeholder="0">
+      <p style="font-size:12px;color:var(--text-muted);margin:4px 0 0;">يُخفَّض من دين الزبون دون إضافته للصندوق (تنازل عند التحصيل)</p>
+    </div>
     <div class="form-group"><label>تاريخ الدفعة</label><input type="date" id="pay-date" value="${todayValue}"></div>
     <div class="form-group"><label>ملاحظات (اختياري)</label><textarea id="pay-notes"></textarea></div>
     <div id="pay-preview" style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text-muted);"></div>
@@ -521,22 +527,25 @@ export function openRecordPaymentSheet(customer, currentBalance, onDone) {
 
   const updatePreview = () => {
     const amount = toCents(overlay.querySelector('#pay-amount').value || 0);
-    const newBalance = currentBalance - amount;
-    overlay.querySelector('#pay-preview').innerHTML = amount > 0
-      ? `الرصيد الجديد بعد الدفعة: <span style="color:${newBalance > 0 ? 'var(--danger)' : 'var(--success)'};">${formatMoney(Math.abs(newBalance))}</span>`
+    const discount = toCents(overlay.querySelector('#pay-discount').value || 0);
+    const newBalance = currentBalance - amount - discount;
+    overlay.querySelector('#pay-preview').innerHTML = (amount > 0 || discount > 0)
+      ? `الرصيد الجديد بعد الدفعة${discount > 0 ? ' والخصم' : ''}: <span style="color:${newBalance > 0 ? 'var(--danger)' : 'var(--success)'};">${formatMoney(Math.abs(newBalance))}</span>`
       : '';
   };
   overlay.querySelector('#pay-amount').oninput = updatePreview;
+  overlay.querySelector('#pay-discount').oninput = updatePreview;
 
   overlay.querySelector('#pay-save').onclick = async () => {
     const btn = overlay.querySelector('#pay-save');
-    const amount = parseFloat(overlay.querySelector('#pay-amount').value);
-    if (!amount || amount <= 0) return toastError('أدخل مبلغًا صحيحًا');
+    const amount = parseFloat(overlay.querySelector('#pay-amount').value) || 0;
+    const discount = parseFloat(overlay.querySelector('#pay-discount').value) || 0;
+    if (amount <= 0 && discount <= 0) return toastError('أدخل مبلغًا أو خصمًا صحيحًا');
     const dateValue = overlay.querySelector('#pay-date').value;
     if (!dateValue) return toastError('حدد تاريخ الدفعة');
     setLoading(btn, true, 'جاري الحفظ...');
     try {
-      await db.addPayment({ customerId: customer.id, amount, method, notes: overlay.querySelector('#pay-notes').value.trim(), createdAt: combineDateWithCurrentTime(dateValue) });
+      await db.addPayment({ customerId: customer.id, amount, discount, method, notes: overlay.querySelector('#pay-notes').value.trim(), createdAt: combineDateWithCurrentTime(dateValue) });
       closeSheet();
       toastSuccess('تم تسجيل الدفعة وتحديث رصيد الزبون');
       if (onDone) onDone();

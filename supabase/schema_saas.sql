@@ -772,6 +772,13 @@ $$;
 
 grant execute on function admin_shop_last_activity() to authenticated;
 
+-- ---------- 26) عمود "خصم" بدفعات الزبائن والموردين (ميزة خصم عند تسجيل دفعة) ----------
+-- بدون هذا العمود يفشل رفع أي دفعة فيها discount بخطأ "Could not find the 'discount' column of
+-- 'payments' in the schema cache" وتعلق كل العمليات اللاحقة بطابور المزامنة خلفها (الطابور يتوقف عند
+-- أول فشل ولا يكمل الباقي - هذا سلوك متعمَّد لحفظ ترتيب العمليات، راجع withSyncLock بـsync.js)
+alter table payments add column if not exists discount integer not null default 0;
+alter table supplier_payments add column if not exists discount integer not null default 0;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

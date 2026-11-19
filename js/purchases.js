@@ -3,7 +3,7 @@
 import * as db from './database.js';
 import { canDelete, getCurrentUser } from './auth.js';
 import { toastError, toastSuccess, toastWarning, openSheet, closeSheet, setLoading, confirmDialog, emptyState, renderPaginatedList } from './ui.js';
-import { formatMoney, formatDateTime, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS, isValidPhone, combineDateWithCurrentTime } from './utils.js';
+import { formatMoney, formatDateTime, formatNumber, toCents, fromCents, escapeHtml, fuzzyMatch, debounce, UNITS, isValidPhone, combineDateWithCurrentTime } from './utils.js';
 import { renderAttachmentsSection } from './attachments.js';
 
 let purchaseState;
@@ -578,7 +578,7 @@ export async function renderPurchaseInvoice(container, purchaseId) {
       <table class="simple-table">
         <thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الشراء</th><th>الإجمالي</th></tr></thead>
         <tbody>
-          ${purchase.items.map(it => `<tr><td>${escapeHtml(it.product_name)}</td><td>${it.quantity} ${it.unit}</td><td>${formatMoney(it.purchase_price)}</td><td>${formatMoney(it.total_price)}</td></tr>`).join('')}
+          ${purchase.items.map(it => `<tr><td>${escapeHtml(it.product_name)}</td><td>${formatNumber(it.quantity)} ${it.unit}</td><td>${formatMoney(it.purchase_price)}</td><td>${formatMoney(it.total_price)}</td></tr>`).join('')}
         </tbody>
       </table>
       ` : ''}

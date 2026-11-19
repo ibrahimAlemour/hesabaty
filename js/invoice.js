@@ -1,7 +1,7 @@
 // عرض الفاتورة: طباعة، مشاركة، تعديل، حذف
 import * as db from './database.js';
 import { getCurrentUser, canDelete } from './auth.js';
-import { formatMoney, formatDateTime, escapeHtml } from './utils.js';
+import { formatMoney, formatDateTime, formatNumber, escapeHtml } from './utils.js';
 import { toastError, toastSuccess, confirmDialog } from './ui.js';
 
 export async function renderInvoice(container, saleId) {
@@ -26,7 +26,7 @@ export async function renderInvoice(container, saleId) {
       <table class="simple-table">
         <thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
         <tbody>
-          ${sale.items.map(it => `<tr><td>${escapeHtml(it.product_name)}</td><td>${it.quantity} ${it.unit}</td><td>${formatMoney(it.selling_price)}</td><td>${formatMoney(it.total_price)}</td></tr>`).join('')}
+          ${sale.items.map(it => `<tr><td>${escapeHtml(it.product_name)}</td><td>${formatNumber(it.quantity)} ${it.unit}</td><td>${formatMoney(it.selling_price)}</td><td>${formatMoney(it.total_price)}</td></tr>`).join('')}
         </tbody>
       </table>
       ` : `<p style="font-size:13px;color:var(--text-muted);">دين مباشر بدون منتجات</p>`}

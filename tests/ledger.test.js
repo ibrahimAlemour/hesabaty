@@ -34,17 +34,18 @@ const { withPage, assert, summary } = require('./_harness');
     await page.evaluate(async () => { const ui = await import('./js/ui.js'); ui.closeSheet(); });
     await page.waitForTimeout(250);
 
-    // فتح تفاصيل حركة الدين والتحقق من ظهور ملاحظتها
+    // فتح حركة الدين (فاتورة بيع): الآن تنقل مباشرة لشاشة الفاتورة الكاملة (أصناف + تعديل) بدل شيت عام
     const debtRows = await page.evaluate(() => Array.from(document.querySelectorAll('[data-ledger-open]')).map(el => el.dataset.ledgerOpen));
     const debtRowSelector = debtRows.find(v => v.startsWith('sale:'));
+    const debtSaleId = debtRowSelector.split(':')[1];
     await page.evaluate((key) => {
       document.querySelector(`[data-ledger-open="${key}"]`).click();
     }, debtRowSelector);
     await page.waitForTimeout(150);
-    const debtNoteShown = await page.evaluate(() => document.querySelector('.sheet')?.textContent.includes('دين ملاحظة اختبار'));
-    assert('ملاحظة الدين تظهر بتفاصيل الحركة', debtNoteShown);
-    await page.evaluate(async () => { const ui = await import('./js/ui.js'); ui.closeSheet(); });
-    await page.waitForTimeout(250);
+    const hashAfterDebtClick = await page.evaluate(() => window.location.hash);
+    assert('الضغط على حركة فاتورة بيع ينقل لشاشة الفاتورة الكاملة', hashAfterDebtClick === `#/invoice/${debtSaleId}`);
+    await page.evaluate(() => { window.location.hash = ''; });
+    await page.waitForTimeout(150);
 
     // حذف حركة الدفعة
     const paymentKey = (await page.evaluate(() => Array.from(document.querySelectorAll('[data-ledger-open]')).map(el => el.dataset.ledgerOpen))).find(v => v.startsWith('payment:'));

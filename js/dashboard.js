@@ -1,8 +1,8 @@
 // لوحة التحكم الرئيسية
-import { getTodayStats, getRecentSales, getSettings, getTotalOutstandingDebt } from './database.js';
+import { getTodayStats, getRecentSales, getSales, getSettings, getTotalOutstandingDebt } from './database.js';
 import { getCurrentUser, canViewProfit } from './auth.js';
-import { formatMoney, todayLabel, formatTime, escapeHtml } from './utils.js';
-import { emptyState } from './ui.js';
+import { formatMoney, todayLabel, formatTime, escapeHtml, startOfDay, endOfDay } from './utils.js';
+import { emptyState, openSheet, closeSheet } from './ui.js';
 import { onSyncStatusChange, getPendingIds } from './sync.js';
 
 export async function renderDashboard(container) {
@@ -60,7 +60,7 @@ export async function renderDashboard(container) {
       <div class="quick-btn" data-nav="#/cash"><span class="emoji">💰</span>الصندوق</div>
     </div>
 
-    <div class="section-title">آخر العمليات <span class="link" data-nav="#/reports">عرض الكل</span></div>
+    <div class="section-title">آخر العمليات <span class="link" id="view-all-sales">عرض الكل</span></div>
     <div class="card" style="padding:6px 10px;">
       ${sales.length ? sales.map(s => saleRow(s, pendingSaleIds)).join('') : emptyState('🧾', 'لا توجد عمليات بيع بعد', 'ابدأ بتسجيل أول عملية بيع')}
     </div>
@@ -68,6 +68,7 @@ export async function renderDashboard(container) {
 
   container.querySelector('#db-new-sale').onclick = () => window.location.hash = '#/sale/new';
   container.querySelectorAll('[data-nav]').forEach(el => el.onclick = () => window.location.hash = el.dataset.nav);
+  container.querySelector('#view-all-sales').onclick = () => openTodaySalesSheet(pendingSaleIds);
 
   if (settings.backendMode === 'supabase') bindDashboardSyncRefresh(container);
 }
@@ -80,6 +81,25 @@ function bindDashboardSyncRefresh(container) {
     if (!onDashboard) { unsubscribe(); return; }
     if (status === 'synced') renderDashboard(container);
   });
+}
+
+// يعرض كل مبيعات اليوم (لا الـ10 الأخيرة فقط كما بالصفحة الرئيسية)، مرتَّبة من الأحدث للأقدم - getSales ترجع
+// النتائج مرتَّبة هكذا مسبقًا (sort على created_at تنازليًا)، فلا حاجة لإعادة الترتيب هنا
+async function openTodaySalesSheet(pendingIds) {
+  const sales = await getSales({ from: startOfDay(), to: endOfDay() });
+  const overlay = openSheet(`
+    <div class="sheet-header">
+      <h3>كل مبيعات اليوم (${sales.length})</h3>
+      <button class="icon-btn" data-detail-close title="إغلاق">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="card" style="padding:6px 10px;max-height:70vh;overflow-y:auto;">
+      ${sales.length ? sales.map(s => saleRow(s, pendingIds)).join('') : emptyState('🧾', 'لا توجد عمليات بيع اليوم بعد')}
+    </div>
+  `);
+  overlay.querySelector('[data-detail-close]').onclick = closeSheet;
+  overlay.querySelectorAll('[data-nav]').forEach(el => el.onclick = () => { closeSheet(); window.location.hash = el.dataset.nav; });
 }
 
 function saleRow(sale, pendingIds) {

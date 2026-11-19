@@ -184,7 +184,12 @@ export async function renderCustomerDetail(container, customerId) {
     root.querySelectorAll('[data-ledger-open]').forEach(el => el.onclick = () => {
       const [type, id] = el.dataset.ledgerOpen.split(':');
       const entry = ledger.find(e => e.type === type && e.id === id);
-      if (entry) openLedgerDetailSheet(entry);
+      if (!entry) return;
+      // حركة من نوع فاتورة بيع: نفتح شاشة الفاتورة الكاملة (الأصناف + تعديل/حذف) بدل شيت "تفاصيل الحركة"
+      // العام - نفس شاشة الفاتورة المستخدمة بكل مكان آخر بالتطبيق، فتعديلها ينعكس تلقائيًا على رصيد
+      // الزبون وسجل الحركات والأرباح والمخزون (renderEditSale تمرّ عبر updateSale بقاعدة البيانات)
+      if (type === 'sale') { closeSheet(); window.location.hash = `#/invoice/${id}`; return; }
+      openLedgerDetailSheet(entry);
     });
     root.querySelectorAll('[data-ledger-delete]').forEach(el => el.onclick = async (ev) => {
       ev.stopPropagation();

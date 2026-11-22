@@ -833,6 +833,19 @@ async function sendTelegramMessage(chatId, text, botToken, env) {
   }
 }
 
+// مؤشر "يكتب..." الأصلي بتيليجرام - يظهر ~5 ثوانٍ تلقائيًا بالمحادثة، تحسين تجربة أثناء معالجة قد تأخذ
+// ثوانٍ معدودة (تصنيف النية + احتمال إعادة محاولات 503). تُستدعى دون انتظار (fire-and-forget) عمدًا
+async function sendChatAction(chatId, botToken, env) {
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, action: 'typing' })
+    });
+  } catch (e) {
+    // غير حرج إطلاقًا - مجرد مؤشر واجهة، تجاهل أي فشل بصمت
+  }
+}
+
 async function getBotUser(chatId, svcHeaders) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/bot_users?chat_id=eq.${chatId}&select=*`, { headers: svcHeaders });
   const rows = await res.json();
@@ -880,6 +893,10 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
     await sendTelegramMessage(chatId, 'البوت غير مهيأ بعد (GEMINI_API_KEY غير مضبوط).', botToken, env);
     return;
   }
+
+  // مؤشر "يكتب..." الأصلي بتيليجرام (لا رسالة نصية إضافية تُزاحم المحادثة) - يُطمئن المستخدم أن البوت يعالج
+  // طلبه فعليًا، خصوصًا أثناء إعادة محاولات 503 المحتملة بـclassifyIntent (قد تصل لثوانٍ معدودة)
+  sendChatAction(chatId, botToken, env); // لا ننتظرها (fire-and-forget) - لا تؤخّر المعالجة الفعلية بأي شيء
 
   let parsed;
   try {

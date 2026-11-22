@@ -54,7 +54,10 @@ function mockFetch(url, opts = {}) {
   }
 
   if (url.includes('api.telegram.org')) {
-    telegramSent.push(JSON.parse(opts.body));
+    // نتجاهل sendChatAction (مؤشر "يكتب...") عمدًا هنا - لا يحمل .text ولا يهمّنا بهذه الاختبارات، فقط
+    // رسائل sendMessage الفعلية المرسَلة فعليًا للمستخدم هي ما تُثبَّت صحتها بهذا الملف
+    if (url.includes('/sendMessage')) telegramSent.push(JSON.parse(opts.body));
+    if (url.includes('/sendChatAction')) global.__TYPING_ACTIONS_SENT__ = (global.__TYPING_ACTIONS_SENT__ || 0) + 1;
     return Promise.resolve({ ok: true, text: async () => '{}' });
   }
 
@@ -155,6 +158,7 @@ function fakeRequest(bodyObj, headers = {}) {
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد أحمد خالد', from: {} } }), ENV);
   // الدين: 10000+5000=15000 - المدفوع: 5000+2000(خصم)=7000 => الرصيد = 8000 فلس = 80 ₪
   assert('رصيد زبون: المبلغ الصحيح شاملًا الخصم (80.00 ₪)', telegramSent.some(m => m.text.includes('80.00')));
+  assert('مؤشر "يكتب..." يُرسَل أثناء المعالجة (تحسين تجربة البطء)', (global.__TYPING_ACTIONS_SENT__ || 0) >= 1);
   assert('رصيد زبون: اسم الزبون الصحيح بالرد', telegramSent.some(m => m.text.includes('أحمد خالد')));
 
   // ========== 5) رصيد زبون بلا أي دين: رسالة "لا يوجد مستحق" ==========

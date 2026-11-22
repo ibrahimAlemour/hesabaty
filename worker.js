@@ -885,8 +885,10 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
   try {
     parsed = await classifyIntent(text, geminiKey);
   } catch (e) {
-    console.error('فشل تصنيف النية عبر Gemini', e);
-    await sendTelegramMessage(chatId, 'تعذّر فهم طلبك حاليًا، حاول صياغته بشكل أوضح أو حاول مرة أخرى بعد قليل.', botToken, env);
+    // نسجّل e.message صراحة (console.error('نص', e) وحدها لا يُظهر رسالة الخطأ الفعلية بسجلّات Cloudflare،
+    // فقط نص الـstack trace) - ونُظهر مختصرها بالرد نفسه مؤقتًا لتسريع التشخيص أثناء الإعداد الأول
+    console.error('فشل تصنيف النية عبر Gemini:', e.message, e.stack);
+    await sendTelegramMessage(chatId, `تعذّر فهم طلبك حاليًا.\n(تفاصيل للمطوّر: ${String(e.message || e).slice(0, 200)})`, botToken, env);
     return;
   }
 

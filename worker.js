@@ -937,13 +937,15 @@ async function classifyIntent(text, geminiKey) {
     })
   });
 
+  // 503 "high demand" من Gemini عابر غالبًا (رسالة Google نفسها تقول "usually temporary")، لكن محاولة واحدة
+  // إضافية لم تكفِ عمليًا بأول استخدام حي للبوت - نحاول حتى 3 مرات إجمالًا بتأخير متصاعد (1s، 2.5s) قبل الاستسلام
   let res = await callGemini();
-  // 503 "high demand" من Gemini عابر غالبًا وينحل خلال ثوانٍ (رسالة Google نفسها تقول "usually temporary") -
-  // محاولة واحدة إضافية بعد تأخير قصير تكفي عمليًا لمعظم الحالات، بدل إفشال رد المستخدم فورًا من أول ذروة طلب
-  if (res.status === 503) {
-    await new Promise(r => setTimeout(r, 1500));
+  const RETRY_DELAYS_MS = [1000, 2500];
+  for (let i = 0; res.status === 503 && i < RETRY_DELAYS_MS.length; i++) {
+    await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[i]));
     res = await callGemini();
   }
+  if (res.status === 503) throw new Error('Gemini مزدحم حاليًا (503) حتى بعد 3 محاولات - جرّب بعد دقيقة');
   if (!res.ok) throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;

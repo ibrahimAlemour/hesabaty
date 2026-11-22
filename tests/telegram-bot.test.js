@@ -40,6 +40,9 @@ function mockFetch(url, opts = {}) {
 
   if (url.includes('generativelanguage.googleapis.com')) {
     global.__GEMINI_CALL_COUNT__ = (global.__GEMINI_CALL_COUNT__ || 0) + 1;
+    if (global.__GEMINI_FAIL_ALWAYS_503__) {
+      return Promise.resolve({ ok: false, status: 503, text: async () => 'high demand' });
+    }
     if (global.__GEMINI_FAIL_ONCE_503__) {
       global.__GEMINI_FAIL_ONCE_503__ = false;
       return Promise.resolve({ ok: false, status: 503, text: async () => 'high demand' });
@@ -226,7 +229,16 @@ function fakeRequest(bodyObj, headers = {}) {
   assert('503 عابر من Gemini: محاولة ثانية تلقائية (استدعاءان لا واحد)', global.__GEMINI_CALL_COUNT__ === 2);
   assert('503 عابر من Gemini: المحاولة الثانية تنجح ويصل الرد الصحيح للمستخدم', telegramSent.some(m => m.text.includes('مبيعات اليوم')));
 
-  // ========== 14) التحقق الأمني من secret_token بالـwebhook ==========
+  // ========== 14) ازدحام 503 مستمر (3 محاولات كلها تفشل): رسالة رفض واضحة بدل انتظار بلا نهاية ==========
+  telegramSent = [];
+  global.__GEMINI_CALL_COUNT__ = 0;
+  global.__GEMINI_FAIL_ALWAYS_503__ = true;
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'مبيعات اليوم', from: {} } }), ENV);
+  assert('503 مستمر: 3 محاولات بالضبط (محاولة أصلية + محاولتان إضافيتان) قبل الاستسلام', global.__GEMINI_CALL_COUNT__ === 3);
+  assert('503 مستمر: رسالة رفض واضحة للمستخدم بعد استنفاد كل المحاولات', telegramSent.some(m => m.text.includes('تعذّر فهم طلبك')));
+  global.__GEMINI_FAIL_ALWAYS_503__ = false;
+
+  // ========== 15) التحقق الأمني من secret_token بالـwebhook ==========
   telegramSent = [];
   const envWithSecret = { ...ENV, TELEGRAM_WEBHOOK_SECRET: 'real-secret' };
   const res1 = await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد أحمد خالد', from: {} } }, {}), envWithSecret);

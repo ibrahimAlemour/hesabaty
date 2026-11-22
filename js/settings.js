@@ -10,6 +10,7 @@ import { getPendingCount, getPendingItems, flushQueue, discardItem } from './syn
 import { escapeHtml, formatDateTime, isValidPhone } from './utils.js';
 import { toastError, toastSuccess, setLoading, openSheet, closeSheet, confirmDialog } from './ui.js';
 import { SAAS_SUPABASE_URL, SAAS_SUPABASE_ANON_KEY } from './saas-config.js';
+import { TELEGRAM_BOT_USERNAME } from './bot-config.js';
 import { wireInstallButton, showIOSInstallInstructions } from './pwa-install.js';
 
 export async function renderSettings(container) {
@@ -81,6 +82,14 @@ export async function renderSettings(container) {
           </li>`).join('') : `<li class="list-item"><div class="info"><div class="subtitle">لا يوجد حسابات كاشير بعد</div></div></li>`}
       </ul>
       <button class="btn btn-secondary btn-block" id="st-add-cashier-supabase" style="margin-top:10px;">+ إضافة حساب كاشير</button>
+    </div>
+    ` : ''}
+
+    ${canManage && isSupabase ? `
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">🤖 بوت تيليجرام</div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">اربط محلك ببوت تيليجرام لاستعلام أرصدة الزبائن ومبيعات اليوم مباشرة من المحادثة.</p>
+      <button class="btn btn-outline btn-block" id="st-bot-link">🔗 ربط تيليجرام</button>
     </div>
     ` : ''}
 
@@ -237,6 +246,9 @@ function bind(container, settings, supabaseCashiers) {
       toastError('ملف النسخة الاحتياطية غير صالح');
     }
   };
+
+  const botLinkBtn = container.querySelector('#st-bot-link');
+  if (botLinkBtn) botLinkBtn.onclick = () => openTelegramLinkSheet();
 
   const sbTestBtn = container.querySelector('#st-sb-test');
   if (sbTestBtn) sbTestBtn.onclick = () => testSupabaseConnection(container);
@@ -446,4 +458,48 @@ function openCashierDetailSheet(container, cashier) {
 export function applyTheme(theme) {
   document.body.classList.remove('theme-auto', 'theme-dark', 'theme-light');
   document.body.classList.add(`theme-${theme}`);
+}
+
+// شيت ربط تيليجرام: يختار الدور (مالك/موظف) أولًا، ثم يولّد كود ربط لمرة واحدة صالح 10 دقائق ويعرض رابطه
+function openTelegramLinkSheet() {
+  const overlay = openSheet(`
+    <div class="sheet-header"><h3>ربط تيليجرام</h3></div>
+    <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px;">اختر نوع الحساب المراد ربطه، ثم افتح الرابط من نفس جهاز تيليجرام الذي تريد ربطه.</p>
+    <div class="form-group">
+      <label>نوع الحساب</label>
+      <div class="pay-methods" style="grid-template-columns:1fr 1fr;">
+        <div class="pay-method-btn active" data-role="owner"><span class="emoji">👑</span>مالك المحل</div>
+        <div class="pay-method-btn" data-role="employee"><span class="emoji">👤</span>موظف</div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-block" id="bl-generate">توليد رابط الربط</button>
+    <div id="bl-result" style="margin-top:14px;"></div>
+  `);
+
+  let role = 'owner';
+  overlay.querySelectorAll('.pay-method-btn').forEach(btn => btn.onclick = () => {
+    role = btn.dataset.role;
+    overlay.querySelectorAll('.pay-method-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+
+  overlay.querySelector('#bl-generate').onclick = async () => {
+    const btn = overlay.querySelector('#bl-generate');
+    setLoading(btn, true, 'جاري التوليد...');
+    try {
+      const { code } = await db.createTelegramLinkCode({ role });
+      const link = `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${code}`;
+      overlay.querySelector('#bl-result').innerHTML = `
+        <div class="form-group"><label>رابط الربط (صالح 10 دقائق فقط)</label>
+          <input type="text" id="bl-link" value="${link}" readonly style="direction:ltr;text-align:left;">
+        </div>
+        <button class="btn btn-secondary btn-block" id="bl-copy">📋 نسخ الرابط</button>
+      `;
+      overlay.querySelector('#bl-copy').onclick = () => copyToClipboard(link, 'رابط الربط');
+      setLoading(btn, false);
+    } catch (err) {
+      toastError(err.message || 'تعذّر توليد رابط الربط');
+      setLoading(btn, false);
+    }
+  };
 }

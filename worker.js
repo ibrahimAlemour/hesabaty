@@ -37,6 +37,9 @@ export default {
     if (url.pathname === '/api/shop/reset-cashier-password') {
       return handleResetCashierPassword(request, env);
     }
+    if (url.pathname === '/api/bot/telegram-webhook') {
+      return handleTelegramWebhook(request, env);
+    }
     return env.ASSETS.fetch(request);
   },
 
@@ -580,7 +583,7 @@ async function processOneSchedule(schedule, svcHeaders, env) {
   // الواحد) كانت جدولة لـ15 زبونًا فقط تحتاج ~70 طلبًا فتفشل حتميًا بالمنتصف - والآن بعد claimSchedule لا
   // تُعاد محاولتها فتُرسَل لجزء من الزبائن فقط بصمت دون أي تنبيه. نجلب كل البيانات اللازمة لكل الزبائن
   // باستعلامين اثنين فقط إجمالًا (بغض النظر عن عددهم)، ونُدرج سجلات الإرسال دفعة واحدة بالنهاية كذلك
-  const { balances, dueDates } = await fetchBalancesAndDueDates(customers, svcHeaders);
+  const { balances, dueDates } = await fetchBalancesAndDueDates(customers, svcHeaders, schedule.shop_id);
 
   const logEntries = [];
   let totalSegments = 0;
@@ -624,11 +627,17 @@ async function processOneSchedule(schedule, svcHeaders, env) {
 
 // يحسب رصيد الدين وموعد الاستحقاق المتوقع لكل زبائن الدفعة دفعة واحدة باستعلامين فقط إجمالًا (نفس منطق
 // getCustomerBalance/getExpectedDueDate بـdatabase.js لكن مجمَّع لكل الزبائن معًا بدل استعلام منفصل لكل واحد)
-export async function fetchBalancesAndDueDates(customers, svcHeaders) {
+// shopId: تصفية إضافية (دفاع بعمق) جنب customer_id=in.(...) - الأخيرة وحدها آمنة فعليًا (customer_id مفتاح
+// أساسي uuid فريد عالميًا، لا يتكرر بين محلين أبدًا)، لكن شرط shop_id الصريح يجعل هذا الضمان مكتوبًا بالكود
+// نفسه بدل الاعتماد على استنتاج ضمني حول تفرّد المعرّفات، تماشيًا مع قاعدة "كل استعلام مفلتر بـshop_id"
+export async function fetchBalancesAndDueDates(customers, svcHeaders, shopId) {
   const idsParam = encodeURIComponent(`in.(${customers.map(c => c.id).join(',')})`);
+  const shopFilter = shopId ? `&shop_id=eq.${shopId}` : '';
   const [salesRes, paymentsRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/sales?customer_id=${idsParam}&is_deleted=eq.false&select=customer_id,paid_debt,created_at`, { headers: svcHeaders }),
-    fetch(`${SUPABASE_URL}/rest/v1/payments?customer_id=${idsParam}&is_deleted=eq.false&select=customer_id,amount`, { headers: svcHeaders })
+    fetch(`${SUPABASE_URL}/rest/v1/sales?customer_id=${idsParam}${shopFilter}&is_deleted=eq.false&select=customer_id,paid_debt,created_at`, { headers: svcHeaders }),
+    // discount يُخفَّض من الدين تمامًا كالمبلغ المحصَّل (راجع getCustomerBalance بـdatabase.js) - بدونه هنا
+    // كانت أرصدة تذكيرات SMS تظهر أعلى من الواقع لأي زبون استُخدم له خصم عند تسجيل دفعة
+    fetch(`${SUPABASE_URL}/rest/v1/payments?customer_id=${idsParam}${shopFilter}&is_deleted=eq.false&select=customer_id,amount,discount`, { headers: svcHeaders })
   ]);
   const sales = await salesRes.json();
   const payments = await paymentsRes.json();
@@ -642,7 +651,7 @@ export async function fetchBalancesAndDueDates(customers, svcHeaders) {
     }
   }
   for (const p of (Array.isArray(payments) ? payments : [])) {
-    paidTotals.set(p.customer_id, (paidTotals.get(p.customer_id) || 0) + (p.amount || 0));
+    paidTotals.set(p.customer_id, (paidTotals.get(p.customer_id) || 0) + (p.amount || 0) + (p.discount || 0));
   }
 
   const balances = new Map();
@@ -756,4 +765,311 @@ function normalizePalestinianPhone(phone) {
   if (digits.startsWith('0') && digits.length === 10) return `972${digits.slice(1)}`;
   if (digits.length === 9) return `972${digits}`; // بدون صفر بادئة
   return null;
+}
+
+// ============================================================
+// بوت تيليجرام (المرحلة 1: استعلامات فقط) - تيليجرام → هذا الـWorker → Gemini (تصنيف نية فقط) → سوبابيس → رد
+// الأسرار المطلوبة (Cloudflare Secrets): TELEGRAM_BOT_TOKEN، TELEGRAM_WEBHOOK_SECRET، GEMINI_API_KEY
+// (SUPABASE_SERVICE_ROLE_KEY مستخدَم أصلًا بباقي الملف). shop_id يُقرأ دائمًا من جدول bot_users (بعد مطابقة
+// chat_id)، لا من نص الرسالة ولا من مخرجات Gemini إطلاقًا - Gemini يُستخدَم فقط لتصنيف النية واستخراج فلاتر
+// نصية (اسم/ملاحظة/تاريخ)، والاستعلامات الفعلية كلها مكتوبة هنا جاهزة (PostgREST عبر REST، لا SQL خام أبدًا)
+// ============================================================
+
+const BOT_INTENTS = new Set(['customer_balance', 'customer_invoices', 'today_sales', 'top_debtors', 'unknown']);
+
+export async function handleTelegramWebhook(request, env) {
+  if (request.method !== 'POST') return json({ ok: true }); // تيليجرام لا يحتاج ردًا مفيدًا لغير POST
+
+  // تحقّق أمني: الطلب فعلاً من تيليجرام (لا من أي طرف يعرف المسار فقط) - راجع تعليمات ضبط secret_token بالنشر
+  const secret = env.TELEGRAM_WEBHOOK_SECRET;
+  if (secret && request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== secret) {
+    return json({ ok: false }, 401);
+  }
+
+  const botToken = env.TELEGRAM_BOT_TOKEN;
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!botToken || !serviceKey) { console.error('TELEGRAM_BOT_TOKEN أو SUPABASE_SERVICE_ROLE_KEY غير مضبوطَين'); return json({ ok: true }); }
+  const svcHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' };
+
+  let update;
+  try { update = await request.json(); } catch (e) { return json({ ok: true }); }
+
+  // نرد دائمًا بـ200 لتيليجرام بغض النظر عن نتيجة المعالجة الداخلية - أي خطأ هنا نُسجّله فقط، ولا نجعل
+  // تيليجرام يعيد إرسال نفس التحديث مرارًا (سلوكه الافتراضي عند أي استجابة غير 200)
+  try {
+    const message = update?.message;
+    const chatId = message?.chat?.id;
+    const text = (message?.text || '').trim();
+    if (!chatId || !text) return json({ ok: true });
+
+    const startMatch = text.match(/^\/start(?:\s+(\S+))?/);
+    if (startMatch) {
+      await handleBotStart(chatId, startMatch[1] || '', message.from, svcHeaders, botToken, env);
+      return json({ ok: true });
+    }
+
+    const botUser = await getBotUser(chatId, svcHeaders);
+    if (!botUser) {
+      await sendTelegramMessage(chatId, 'حسابك غير مرتبط بأي محل بعد. اطلب رابط الربط من صاحب المحل (الإعدادات > ربط تيليجرام)، أو افتحه بنفسك إن كنت صاحب المحل.', botToken, env);
+      return json({ ok: true });
+    }
+
+    await handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env);
+  } catch (e) {
+    console.error('خطأ أثناء معالجة تحديث بوت تيليجرام', e);
+  }
+  return json({ ok: true });
+}
+
+async function sendTelegramMessage(chatId, text, botToken, env) {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text })
+    });
+    if (!res.ok) console.error('فشل إرسال رد تيليجرام', await res.text());
+  } catch (e) {
+    console.error('تعذّر الاتصال بـAPI تيليجرام', e);
+  }
+}
+
+async function getBotUser(chatId, svcHeaders) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bot_users?chat_id=eq.${chatId}&select=*`, { headers: svcHeaders });
+  const rows = await res.json();
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+// ---------- /start <code>: ربط chat_id بمحل عبر كود لمرة واحدة ----------
+async function handleBotStart(chatId, code, fromUser, svcHeaders, botToken, env) {
+  if (!code) {
+    await sendTelegramMessage(chatId, 'افتح رابط الربط من إعدادات التطبيق (ربط تيليجرام) حتى يتم ربط حسابك تلقائيًا.', botToken, env);
+    return;
+  }
+
+  const codeRes = await fetch(`${SUPABASE_URL}/rest/v1/bot_link_codes?code=eq.${encodeURIComponent(code)}&select=*`, { headers: svcHeaders });
+  const codeRows = await codeRes.json();
+  const linkCode = Array.isArray(codeRows) && codeRows.length ? codeRows[0] : null;
+
+  if (!linkCode || new Date(linkCode.expires_at) < new Date()) {
+    await sendTelegramMessage(chatId, '⚠️ رابط الربط غير صالح أو منتهي الصلاحية (صالح 10 دقائق فقط). اطلب رابطًا جديدًا من إعدادات التطبيق.', botToken, env);
+    if (linkCode) await fetch(`${SUPABASE_URL}/rest/v1/bot_link_codes?code=eq.${encodeURIComponent(code)}`, { method: 'DELETE', headers: svcHeaders });
+    return;
+  }
+
+  const name = [fromUser?.first_name, fromUser?.last_name].filter(Boolean).join(' ') || fromUser?.username || 'مستخدم تيليجرام';
+
+  // upsert بالاعتماد على فرادة chat_id (unique) - لو كان هذا الـchat_id مربوطًا بمحل آخر من قبل، الربط الجديد يستبدله
+  await fetch(`${SUPABASE_URL}/rest/v1/bot_users?on_conflict=chat_id`, {
+    method: 'POST', headers: { ...svcHeaders, Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ chat_id: chatId, shop_id: linkCode.shop_id, name, role: linkCode.role })
+  });
+  // الكود لمرة واحدة فقط - يُحذف فورًا بعد الاستخدام بغض النظر عن النجاح، فلا يمكن إعادة استخدامه
+  await fetch(`${SUPABASE_URL}/rest/v1/bot_link_codes?code=eq.${encodeURIComponent(code)}`, { method: 'DELETE', headers: svcHeaders });
+
+  const shopRes = await fetch(`${SUPABASE_URL}/rest/v1/shops?id=eq.${linkCode.shop_id}&select=name`, { headers: svcHeaders });
+  const shops = await shopRes.json();
+  const shopName = (Array.isArray(shops) && shops[0]?.name) || 'محلك';
+
+  await sendTelegramMessage(chatId, `✅ تم الربط بنجاح بمحل "${shopName}" بصفة ${linkCode.role === 'owner' ? 'مالك' : 'موظف'}.\n\nجرّب الآن مثلاً: "رصيد فلان" أو "مبيعات اليوم".`, botToken, env);
+}
+
+// ---------- معالجة رسالة عادية من حساب مرتبط: Gemini لتصنيف النية فقط، ثم استعلام جاهز مسبقًا ----------
+async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env) {
+  const geminiKey = env.GEMINI_API_KEY;
+  if (!geminiKey) {
+    await sendTelegramMessage(chatId, 'البوت غير مهيأ بعد (GEMINI_API_KEY غير مضبوط).', botToken, env);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = await classifyIntent(text, geminiKey);
+  } catch (e) {
+    console.error('فشل تصنيف النية عبر Gemini', e);
+    await sendTelegramMessage(chatId, 'تعذّر فهم طلبك حاليًا، حاول صياغته بشكل أوضح أو حاول مرة أخرى بعد قليل.', botToken, env);
+    return;
+  }
+
+  const shopId = botUser.shop_id; // shop_id دائمًا من bot_users - لا من parsed إطلاقًا (Gemini لا يُرجع shop_id أصلًا)
+  let reply;
+  switch (parsed.intent) {
+    case 'customer_balance':
+      reply = await handleIntentCustomerBalance(shopId, parsed.customer, svcHeaders);
+      break;
+    case 'customer_invoices':
+      reply = await handleIntentCustomerInvoices(shopId, parsed, svcHeaders);
+      break;
+    case 'today_sales':
+      reply = await handleIntentTodaySales(shopId, svcHeaders);
+      break;
+    case 'top_debtors':
+      reply = await handleIntentTopDebtors(shopId, svcHeaders);
+      break;
+    default:
+      reply = 'ما قدرت أفهم طلبك. جرّب مثلاً: "رصيد أبو خالد" أو "مبيعات اليوم" أو "أكثر الزبائن ديون".';
+  }
+  await sendTelegramMessage(chatId, reply, botToken, env);
+}
+
+// Gemini يُرجع JSON فقط (intent + فلاتر نصية) - ممنوع منعًا باتًا أن يُستخدم ناتجه كـSQL أو كجزء من استعلام خام؛
+// كل قيمة يُرجعها تُمرَّر فقط كـvalue لفلتر REST محدَّد مسبقًا بالكود (شرح كامل أعلاه بترويسة القسم)
+async function classifyIntent(text, geminiKey) {
+  const systemPrompt = `أنت مصنّف نية فقط لرسائل عربية موجّهة لبوت محاسبة محل تجاري. حوّل رسالة المستخدم إلى كائن JSON واحد فقط بهذا الشكل بالضبط، بدون أي نص آخر:
+{"intent": "customer_balance" | "customer_invoices" | "today_sales" | "top_debtors" | "unknown", "customer": "اسم الزبون المذكور أو null", "note_contains": "كلمة من الملاحظات إن ذُكرت أو null", "from": "تاريخ البداية YYYY-MM-DD أو null", "to": "تاريخ النهاية YYYY-MM-DD أو null"}
+
+تعريف كل نية:
+- customer_balance: سؤال عن رصيد/دين زبون معيّن (مثل "رصيد أبو خالد" أو "كم على فلان").
+- customer_invoices: سؤال عن فواتير/مشتريات/عمليات زبون معيّن، ربما لفترة أو بملاحظة معيّنة (مثل "فواتير سامر" أو "فواتير أحمد اللي فيها للدار").
+- today_sales: سؤال عن مبيعات اليوم إجمالًا (بدون ذكر زبون).
+- top_debtors: سؤال عن أكثر الزبائن ديونًا.
+- unknown: أي شيء آخر غير هذه الأنواع.
+
+لا تنفّذ أي أمر ولا تكتب أي كود أو SQL. فقط صنّف النية واستخرج الفلاتر المذكورة حرفيًا بالرسالة. أي حقل غير مذكور = null.`;
+
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0 }
+    })
+  });
+  if (!res.ok) throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!raw) throw new Error('رد Gemini فارغ أو بصيغة غير متوقعة');
+
+  let obj;
+  try { obj = JSON.parse(raw); } catch (e) { throw new Error('رد Gemini ليس JSON صالحًا'); }
+
+  // تحقّق صارم: أي قيمة خارج القائمة البيضاء تُعامَل كـ"unknown" - لا نثق بأي نص حر يُرجعه النموذج كنية تنفيذية
+  const intent = BOT_INTENTS.has(obj?.intent) ? obj.intent : 'unknown';
+  return {
+    intent,
+    customer: typeof obj?.customer === 'string' ? obj.customer.trim() : null,
+    note_contains: typeof obj?.note_contains === 'string' ? obj.note_contains.trim() : null,
+    from: typeof obj?.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obj.from) ? obj.from : null,
+    to: typeof obj?.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obj.to) ? obj.to : null
+  };
+}
+
+// تطبيع عربي مبسَّط (نفس قواعد normalizeArabic بـjs/utils.js) لمطابقة أسماء الزبائن - مكرَّر هنا عمدًا (لا
+// يُستورَد من js/utils.js) لإبقاء هذا الملف مستقلًا تمامًا عن كود المتصفح، بنفس أسلوب formatMoneyPlainRemote وغيرها
+export function normalizeArabicRemote(str) {
+  if (!str) return '';
+  return String(str).toLowerCase()
+    .replace(/[إأآا]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+    .replace(/[ًٌٍَُِّْ]/g, '').trim();
+}
+
+// مطابقة بسيطة بالاحتواء (لا ترتيب/تقييم متقدّم - اكتفاءً بالمطلوب فعليًا بالمرحلة 1): نجلب كل زبائن المحل
+// (مفلترين بـshop_id فقط) ونطابق بالتطبيع + substring على الجهتين، حتى يعمل البحث الجزئي ("خالد" يطابق "أبو خالد")
+export async function findCustomerByName(shopId, query, svcHeaders) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/customers?shop_id=eq.${shopId}&is_deleted=eq.false&select=id,name,phone`, { headers: svcHeaders });
+  const customers = await res.json();
+  if (!Array.isArray(customers)) return { status: 'none' };
+
+  const normQuery = normalizeArabicRemote(query);
+  if (!normQuery) return { status: 'none' };
+
+  const matches = customers.filter(c => {
+    const normName = normalizeArabicRemote(c.name);
+    return normName.includes(normQuery) || normQuery.includes(normName);
+  });
+
+  if (!matches.length) return { status: 'none' };
+  if (matches.length === 1) return { status: 'found', customer: matches[0] };
+  return { status: 'ambiguous', matches };
+}
+
+function formatAmbiguousReply(matches) {
+  const list = matches.slice(0, 8).map((c, i) => `${i + 1}. ${c.name}${c.phone ? ` (${c.phone})` : ''}`).join('\n');
+  return `في أكثر من زبون بهالاسم:\n${list}\n\nابعت الاسم كامل أو أدق حتى أقدر أحدد المقصود.`;
+}
+
+// ---------- النية 1: رصيد زبون ----------
+async function handleIntentCustomerBalance(shopId, customerQuery, svcHeaders) {
+  if (!customerQuery) return 'بدي اسم الزبون حتى أقدر أجيب رصيده. مثال: "رصيد أبو خالد".';
+  const match = await findCustomerByName(shopId, customerQuery, svcHeaders);
+  if (match.status === 'none') return `ما لقيت زبون اسمه قريب من "${customerQuery}".`;
+  if (match.status === 'ambiguous') return formatAmbiguousReply(match.matches);
+
+  const customer = match.customer;
+  const [salesRes, paymentsRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=paid_debt`, { headers: svcHeaders }),
+    fetch(`${SUPABASE_URL}/rest/v1/payments?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=amount,discount`, { headers: svcHeaders })
+  ]);
+  const sales = await salesRes.json();
+  const payments = await paymentsRes.json();
+  const debtTotal = (Array.isArray(sales) ? sales : []).reduce((s, x) => s + (x.paid_debt || 0), 0);
+  const paidTotal = (Array.isArray(payments) ? payments : []).reduce((s, x) => s + (x.amount || 0) + (x.discount || 0), 0);
+  const balance = debtTotal - paidTotal;
+
+  if (balance > 0) return `رصيد ${customer.name}: عليه ${formatMoneyPlainRemote(balance)}.`;
+  if (balance < 0) return `رصيد ${customer.name}: له ${formatMoneyPlainRemote(-balance)} (دفع أكثر من المطلوب).`;
+  return `رصيد ${customer.name}: لا يوجد عليه أي مبلغ مستحق حاليًا.`;
+}
+
+// ---------- النية 2: فواتير زبون لفترة (مع فلترة اختيارية بالملاحظات) ----------
+async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
+  if (!parsed.customer) return 'بدي اسم الزبون حتى أقدر أجيب فواتيره. مثال: "فواتير سامر".';
+  const match = await findCustomerByName(shopId, parsed.customer, svcHeaders);
+  if (match.status === 'none') return `ما لقيت زبون اسمه قريب من "${parsed.customer}".`;
+  if (match.status === 'ambiguous') return formatAmbiguousReply(match.matches);
+
+  const customer = match.customer;
+  let q = `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false`;
+  if (parsed.from) q += `&created_at=gte.${encodeURIComponent(parsed.from + 'T00:00:00.000Z')}`;
+  if (parsed.to) q += `&created_at=lte.${encodeURIComponent(parsed.to + 'T23:59:59.999Z')}`;
+  if (parsed.note_contains) q += `&notes=ilike.${encodeURIComponent('%' + parsed.note_contains + '%')}`;
+  q += '&select=invoice_number,total_amount,payment_status,notes,created_at&order=created_at.desc&limit=20';
+
+  const res = await fetch(q, { headers: svcHeaders });
+  const sales = await res.json();
+  if (!Array.isArray(sales) || !sales.length) return `ما في فواتير لـ${customer.name} بهالشروط.`;
+
+  const STATUS_LABELS = { paid: 'مدفوعة', partial: 'جزئي', debt: 'دين' };
+  const lines = sales.map(s => `• ${s.invoice_number} - ${formatMoneyPlainRemote(s.total_amount)} - ${STATUS_LABELS[s.payment_status] || s.payment_status} - ${formatDatePlainRemote(s.created_at)}${s.notes ? ` (${s.notes})` : ''}`);
+  const suffix = sales.length === 20 ? '\n\n(عرضت آخر 20 فاتورة فقط)' : '';
+  return `فواتير ${customer.name} (${sales.length}):\n${lines.join('\n')}${suffix}`;
+}
+
+// ---------- النية 3: مبيعات اليوم ----------
+async function handleIntentTodaySales(shopId, svcHeaders) {
+  const now = new Date();
+  const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+  const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999)).toISOString();
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(startOfDay)}&created_at=lte.${encodeURIComponent(endOfDay)}&select=total_amount,paid_cash,paid_transfer,paid_debt`,
+    { headers: svcHeaders }
+  );
+  const sales = await res.json();
+  if (!Array.isArray(sales) || !sales.length) return 'لا توجد مبيعات اليوم حتى الآن.';
+
+  const total = sales.reduce((s, x) => s + (x.total_amount || 0), 0);
+  const cash = sales.reduce((s, x) => s + (x.paid_cash || 0), 0);
+  const transfer = sales.reduce((s, x) => s + (x.paid_transfer || 0), 0);
+  const debt = sales.reduce((s, x) => s + (x.paid_debt || 0), 0);
+  return `مبيعات اليوم: ${sales.length} فاتورة بإجمالي ${formatMoneyPlainRemote(total)}.\n💵 نقدي: ${formatMoneyPlainRemote(cash)}\n📱 تحويل: ${formatMoneyPlainRemote(transfer)}\n📝 آجل: ${formatMoneyPlainRemote(debt)}`;
+}
+
+// ---------- النية 4: أكثر 10 زبائن عليهم ديون ----------
+async function handleIntentTopDebtors(shopId, svcHeaders) {
+  const custRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?shop_id=eq.${shopId}&is_deleted=eq.false&select=id,name,phone`, { headers: svcHeaders });
+  const customers = await custRes.json();
+  if (!Array.isArray(customers) || !customers.length) return 'لا يوجد زبائن مسجَّلون بعد.';
+
+  // نُعيد استخدام نفس دالة حساب الرصيد المستخدمة أصلًا لتذكيرات SMS (fetchBalancesAndDueDates) حتى يبقى
+  // رقم "أكثر الزبائن ديونًا" مطابقًا دائمًا لنفس الرصيد الظاهر بالتطبيق وبرسالة "رصيد زبون" أعلاه تمامًا
+  const { balances } = await fetchBalancesAndDueDates(customers, svcHeaders, shopId);
+  const debtors = customers
+    .map(c => ({ ...c, balance: balances.get(c.id) || 0 }))
+    .filter(c => c.balance > 0)
+    .sort((a, b) => b.balance - a.balance)
+    .slice(0, 10);
+
+  if (!debtors.length) return 'لا يوجد زبائن عليهم ديون حاليًا 🎉';
+  const lines = debtors.map((c, i) => `${i + 1}. ${c.name} - ${formatMoneyPlainRemote(c.balance)}`);
+  return `أكثر ${debtors.length} زبائن ديونًا:\n${lines.join('\n')}`;
 }

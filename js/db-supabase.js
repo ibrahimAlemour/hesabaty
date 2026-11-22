@@ -251,6 +251,13 @@ export async function deleteAttachmentRow(id) {
   if (error) throw error;
 }
 
+// بوت تيليجرام: إدراج مباشر فقط (anon key + RLS تضمن shop_id = my_shop_id() and is_owner()) - لا قراءة
+// ولا كتابة أخرى لهذا الجدول من المتصفح إطلاقًا، الفحص والحذف بعد الاستخدام يتمّان من Worker بـservice_role
+export async function createBotLinkCode(record) {
+  const { error } = await supabaseClient.from('bot_link_codes').insert(record);
+  if (error) throw error;
+}
+
 // تحميل مكتبة supabase-js من CDN مرة واحدة فقط عند الحاجة
 let supabaseScriptPromise = null;
 export function loadSupabaseScript() {

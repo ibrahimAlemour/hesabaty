@@ -1,6 +1,6 @@
 // Service Worker: يجعل التطبيق يعمل بالكامل بدون إنترنت (Offline-first)
-const CACHE_NAME = 'hesabaty-cache-v22';
-const RUNTIME_CACHE = 'hesabaty-runtime-v22';
+const CACHE_NAME = 'hesabaty-cache-v23';
+const RUNTIME_CACHE = 'hesabaty-runtime-v23';
 
 // الملفات "الحرجة" التي يجب أن ينجح تخزينها لتفعيل نسخة جديدة من Service Worker: بدونها التطبيق لا
 // يعمل إطلاقًا حتى بالوضع الأساسي. باقي الشاشات (sales.js, reports.js...) غير حرجة لأنها تُجلب وتُخزَّن
@@ -39,6 +39,7 @@ const APP_SHELL = [
   './js/cash-receipts.js',
   './js/welcome.js',
   './js/saas-config.js',
+  './js/bot-config.js',
   './js/pwa-install.js',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',

@@ -1411,4 +1411,21 @@ export async function wipeLocalData() {
   settingsCache = null;
 }
 
+// ---------- بوت تيليجرام: توليد كود ربط لمرة واحدة (صالح 10 دقائق) ----------
+// يكتب مباشرة لسوبابيس (anon key + RLS) بلا مرور بطابور المزامنة المحلي - الميزة أصلًا تتطلب backendMode
+// 'supabase' فعليًا (البوت والـWorker لا يعملان إلا مع سوبابيس)، فلا معنى لتأجيل الكتابة محليًا بالوضع المحلي البحت
+export async function createTelegramLinkCode({ role } = {}) {
+  const settings = await getSettings();
+  if (settings.backendMode !== 'supabase' || !remoteDb.getClient()) {
+    throw new Error('ربط تيليجرام متاح فقط مع وضع سوبابيس (SaaS) مع اتصال فعّال بالإنترنت');
+  }
+  if (!settings.currentShopId) throw new Error('تعذّر تحديد المحل الحالي');
+  const code = uuid();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await remoteDb.createBotLinkCode({
+    code, shop_id: settings.currentShopId, role: role === 'owner' ? 'owner' : 'employee', expires_at: expiresAt
+  });
+  return { code, expiresAt };
+}
+
 export { sync };

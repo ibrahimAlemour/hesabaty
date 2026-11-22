@@ -779,6 +779,35 @@ grant execute on function admin_shop_last_activity() to authenticated;
 alter table payments add column if not exists discount integer not null default 0;
 alter table supplier_payments add column if not exists discount integer not null default 0;
 
+-- ---------- 27) بوت تيليجرام: ربط المحلات (multi-tenant) ----------
+-- bot_users: يربط chat_id بتيليجرام بمحل معيّن ودور (owner/employee). يُدار حصرًا من Cloudflare Worker
+-- بمفتاح service_role (يتجاوز RLS) - بدون أي سياسة RLS هنا عمدًا فيبقى الجدول مرفوضًا تمامًا من متصفح
+-- المحل (anon/authenticated)، تمامًا مثل sms_log بالضبط. shop_id هنا هو مصدر الحقيقة الوحيد لعزل
+-- المحلات بالبوت - يُقرأ دائمًا من هذا الجدول (بعد التحقق من chat_id المرسل)، لا من نص الرسالة ولا من Gemini
+create table if not exists bot_users (
+  id uuid primary key default gen_random_uuid(),
+  chat_id bigint not null unique,
+  shop_id uuid not null references shops(id) on delete cascade,
+  name text,
+  role text not null default 'employee' check (role in ('owner', 'employee')),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_bot_users_shop on bot_users (shop_id);
+alter table bot_users enable row level security;
+
+-- bot_link_codes: كود لمرة واحدة صالح 10 دقائق لربط حساب تيليجرام بمحل. صاحب المحل فقط يولّد كودًا لمحله
+-- (إدراج مباشر من واجهة الإعدادات بمفتاح anon + RLS)؛ الفحص والحذف بعد الاستخدام يتمّان بـWorker بـservice_role
+create table if not exists bot_link_codes (
+  code text primary key,
+  shop_id uuid not null references shops(id) on delete cascade,
+  role text not null default 'employee' check (role in ('owner', 'employee')),
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+alter table bot_link_codes enable row level security;
+create policy bot_link_codes_insert_owner on bot_link_codes for insert
+  with check (shop_id = my_shop_id() and is_owner());
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

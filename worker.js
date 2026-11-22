@@ -928,7 +928,7 @@ async function classifyIntent(text, geminiKey) {
 
 لا تنفّذ أي أمر ولا تكتب أي كود أو SQL. فقط صنّف النية واستخرج الفلاتر المذكورة حرفيًا بالرسالة. أي حقل غير مذكور = null.`;
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`, {
+  const callGemini = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -936,6 +936,14 @@ async function classifyIntent(text, geminiKey) {
       generationConfig: { responseMimeType: 'application/json', temperature: 0 }
     })
   });
+
+  let res = await callGemini();
+  // 503 "high demand" من Gemini عابر غالبًا وينحل خلال ثوانٍ (رسالة Google نفسها تقول "usually temporary") -
+  // محاولة واحدة إضافية بعد تأخير قصير تكفي عمليًا لمعظم الحالات، بدل إفشال رد المستخدم فورًا من أول ذروة طلب
+  if (res.status === 503) {
+    await new Promise(r => setTimeout(r, 1500));
+    res = await callGemini();
+  }
   if (!res.ok) throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;

@@ -39,6 +39,11 @@ function mockFetch(url, opts = {}) {
   const method = opts.method || 'GET';
 
   if (url.includes('generativelanguage.googleapis.com')) {
+    global.__GEMINI_CALL_COUNT__ = (global.__GEMINI_CALL_COUNT__ || 0) + 1;
+    if (global.__GEMINI_FAIL_ONCE_503__) {
+      global.__GEMINI_FAIL_ONCE_503__ = false;
+      return Promise.resolve({ ok: false, status: 503, text: async () => 'high demand' });
+    }
     const body = JSON.parse(opts.body);
     const userText = body.contents[0].parts[0].text;
     const intentJson = global.__GEMINI_MOCK__ ? global.__GEMINI_MOCK__(userText) : { intent: 'unknown' };
@@ -212,7 +217,16 @@ function fakeRequest(bodyObj, headers = {}) {
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'أي شيء', from: {} } }), ENV);
   assert('نية غير متوقَّعة من Gemini تُعامَل كـunknown بأمان (رد توضيحي، لا تنفيذ)', telegramSent.some(m => m.text.includes('ما قدرت أفهم')));
 
-  // ========== 13) التحقق الأمني من secret_token بالـwebhook ==========
+  // ========== 13) فشل مؤقت (503 "ازدحام") من Gemini: محاولة واحدة إضافية تلقائية قبل الاستسلام ==========
+  telegramSent = [];
+  global.__GEMINI_CALL_COUNT__ = 0;
+  global.__GEMINI_FAIL_ONCE_503__ = true;
+  global.__GEMINI_MOCK__ = () => ({ intent: 'today_sales', customer: null, note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'مبيعات اليوم', from: {} } }), ENV);
+  assert('503 عابر من Gemini: محاولة ثانية تلقائية (استدعاءان لا واحد)', global.__GEMINI_CALL_COUNT__ === 2);
+  assert('503 عابر من Gemini: المحاولة الثانية تنجح ويصل الرد الصحيح للمستخدم', telegramSent.some(m => m.text.includes('مبيعات اليوم')));
+
+  // ========== 14) التحقق الأمني من secret_token بالـwebhook ==========
   telegramSent = [];
   const envWithSecret = { ...ENV, TELEGRAM_WEBHOOK_SECRET: 'real-secret' };
   const res1 = await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد أحمد خالد', from: {} } }, {}), envWithSecret);

@@ -39,6 +39,7 @@ let telegramSent = [];
 const mockAI = {
   async run(model, { messages }) {
     global.__AI_CALL_COUNT__ = (global.__AI_CALL_COUNT__ || 0) + 1;
+    global.__LAST_SYSTEM_PROMPT__ = messages.find(m => m.role === 'system')?.content || '';
     if (global.__AI_FAIL_ALWAYS__) throw new Error('Workers AI غير متاح (محاكاة فشل دائم)');
     if (global.__AI_FAIL_ONCE__) { global.__AI_FAIL_ONCE__ = false; throw new Error('خطأ عابر (محاكاة)'); }
     const userText = messages.find(m => m.role === 'user').content;
@@ -212,6 +213,34 @@ function fakeRequest(bodyObj, headers = {}) {
   const idxC1 = topMsg.indexOf('أحمد خالد'); // رصيده 80
   assert('أكثر المدينين: الترتيب تنازلي (خالد محمود 200 قبل أحمد خالد 80)', idxC2 >= 0 && idxC1 >= 0 && idxC2 < idxC1);
   assert('أكثر المدينين: لا يظهر زبون بلا دين (نور)', !topMsg.includes('نور بلا دين'));
+
+  // ========== 10.5) حدود "اليوم المحلي" بتوقيت غزة (gazaDayBoundsUtc) - فحص مباشر بتاريخ ثابت ==========
+  // غزة شتاءً = UTC+2 بلا توقيت صيفي - منتصف الليل المحلي (00:00) = الساعة 22:00 UTC باليوم السابق
+  const gazaBounds = worker.gazaDayBoundsUtc('2026-11-23');
+  assert('حدود يوم غزة: بداية اليوم محوَّلة لـUTC بشكل صحيح (لا منتصف ليل UTC)', gazaBounds.start === '2026-11-22T22:00:00.000Z');
+  assert('حدود يوم غزة: نهاية اليوم محوَّلة لـUTC بشكل صحيح', gazaBounds.end === '2026-11-23T21:59:59.999Z');
+
+  // ========== 10.6) الـprompt يحتوي تاريخ اليوم/أمس الفعليَّين بتوقيت غزة (لا يُترَك للذكاء الاصطناعي يحسبهما) ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'today_sales', customer: null, note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'مبيعات اليوم', from: {} } }), ENV);
+  const expectedTodayGaza = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
+  const expectedYesterdayGaza = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  assert('الـprompt يحتوي تاريخ اليوم الصحيح بتوقيت غزة', global.__LAST_SYSTEM_PROMPT__.includes(expectedTodayGaza));
+  assert('الـprompt يحتوي تاريخ أمس الصحيح بتوقيت غزة', global.__LAST_SYSTEM_PROMPT__.includes(expectedYesterdayGaza));
+
+  // ========== 10.7) "إيش أخذ فلان مبارح؟": فاتورة الساعة 00:30 بتوقيت غزة أمس يجب أن تُحتسَب ضمن أمس بالضبط
+  // (هذا بالضبط ما كان يفشل بالمنطق القديم المعتمد على حدود UTC بدل غزة - كانت لتُحتسَب ضمن يوم خطأ) ==========
+  const yesterdayGazaBounds = worker.gazaDayBoundsUtc(expectedYesterdayGaza);
+  const nearMidnightYesterdayGaza = new Date(new Date(yesterdayGazaBounds.start).getTime() + 30 * 60 * 1000).toISOString();
+  DB.sales.push({
+    id: 's9', shop_id: 'shop1', customer_id: 'c1', paid_debt: 0, total_amount: 7777, paid_cash: 7777, paid_transfer: 0,
+    is_deleted: false, created_at: nearMidnightYesterdayGaza, invoice_number: 'INV-YEST', payment_status: 'paid', notes: 'طلبية مبارح'
+  });
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: null, from: expectedYesterdayGaza, to: expectedYesterdayGaza });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'إيش أخذ أحمد خالد مبارح؟', from: {} } }), ENV);
+  assert('"مبارح": فاتورة 00:30 بتوقيت غزة أمس تظهر ضمن نتائج أمس بالضبط', telegramSent.some(m => m.text.includes('INV-YEST') && m.text.includes('77.77')));
 
   // ========== 11) عزل المحلات: كل استعلامات REST المُرسَلة لمحل shop1 تحتوي shop_id=eq.shop1 فعليًا ==========
   const capturedUrls = [];

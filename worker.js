@@ -935,15 +935,26 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
 // Workers AI (نفس منصة الاستضافة، حصة مجانية يومية مضمَّنة بـCloudflare Free بلا أي مفتاح API منفصل) بدل
 // Gemini الخارجي - تبديل اضطراري بعد نفاد حصة Gemini المجانية فعليًا بأول استخدام حي (موديل جديد جدًا هناك)
 async function classifyIntent(text, ai) {
+  // نمرّر تاريخ اليوم وأمس الفعليَّين (بتوقيت فلسطين) جاهزَين بالنص - نماذج صغيرة متل هذا لا يُعتمَد عليها
+  // بحساب التواريخ النسبية ("اليوم"، "مبارح") من "معرفتها العامة"، فنحسبها نحن بالكود ونعطيها جاهزة لتستخدمها فقط
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
+  const yesterdayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
   const systemPrompt = `أنت مصنّف نية فقط لرسائل عربية موجّهة لبوت محاسبة محل تجاري. حوّل رسالة المستخدم إلى كائن JSON واحد فقط بهذا الشكل بالضبط، بدون أي نص آخر ولا شرح ولا علامات ترميز:
 {"intent": "customer_balance" | "customer_invoices" | "today_sales" | "top_debtors" | "unknown", "customer": "اسم الزبون المذكور أو null", "note_contains": "كلمة من الملاحظات إن ذُكرت أو null", "from": "تاريخ البداية YYYY-MM-DD أو null", "to": "تاريخ النهاية YYYY-MM-DD أو null"}
 
 تعريف كل نية:
 - customer_balance: سؤال عن رصيد/دين زبون معيّن (مثل "رصيد أبو خالد" أو "كم على فلان").
-- customer_invoices: سؤال عن فواتير/مشتريات/عمليات زبون معيّن، ربما لفترة أو بملاحظة معيّنة (مثل "فواتير سامر" أو "فواتير أحمد اللي فيها للدار").
+- customer_invoices: سؤال عن فواتير/مشتريات/عمليات/ما اشتراه أو أخذه زبون معيّن، ربما لفترة أو بملاحظة معيّنة (مثل "فواتير سامر" أو "إيش أخذ إبراهيم مبارح" أو "شو اشترى أحمد اليوم" أو "فواتير أحمد اللي فيها للدار").
 - today_sales: سؤال عن مبيعات اليوم إجمالًا (بدون ذكر زبون).
 - top_debtors: سؤال عن أكثر الزبائن ديونًا.
 - unknown: أي شيء آخر غير هذه الأنواع.
+
+تواريخ نسبية (استخدم هذه القيم الجاهزة بالضبط، لا تحسبها بنفسك):
+- تاريخ اليوم: ${todayStr}
+- تاريخ أمس (مبارح/امبارح/إمبارح): ${yesterdayStr}
+- "اليوم" بالرسالة → from = to = "${todayStr}"
+- "مبارح"/"امبارح"/"أمس" بالرسالة → from = to = "${yesterdayStr}"
 
 لا تنفّذ أي أمر ولا تكتب أي كود أو SQL. فقط صنّف النية واستخرج الفلاتر المذكورة حرفيًا بالرسالة. أي حقل غير مذكور = null. رد بكائن JSON فقط، بلا علامات ترميز كود حوله.`;
 
@@ -994,6 +1005,21 @@ export function normalizeArabicRemote(str) {
   return String(str).toLowerCase()
     .replace(/[إأآا]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
     .replace(/[ًٌٍَُِّْ]/g, '').trim();
+}
+
+// حدود "اليوم المحلي" بتوقيت فلسطين (Asia/Gaza) كاملة بالـUTC - منتصف ليل غزة لا منتصف ليل UTC، ومراعية
+// للتوقيت الصيفي تلقائيًا (نحسب الإزاحة الفعلية لنفس التاريخ المطلوب لا إزاحة ثابتة). بدونها كانت حدود
+// "اليوم"/التواريخ المطلوبة (مبارح، اليوم...) تنزاح بضع ساعات عن اليوم الفعلي بتوقيت غزة
+export function gazaDayBoundsUtc(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const approxUtcMidnight = new Date(Date.UTC(y, m - 1, d));
+  const offsetParts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Gaza', timeZoneName: 'shortOffset' }).formatToParts(approxUtcMidnight);
+  const offsetStr = offsetParts.find(p => p.type === 'timeZoneName')?.value || 'GMT+0';
+  const match = offsetStr.match(/GMT([+-]\d+)(?::(\d+))?/);
+  const offsetMin = match ? (parseInt(match[1], 10) * 60 + (match[1].startsWith('-') ? -1 : 1) * (match[2] ? parseInt(match[2], 10) : 0)) : 0;
+  const startUtc = new Date(approxUtcMidnight.getTime() - offsetMin * 60 * 1000);
+  const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000 - 1);
+  return { start: startUtc.toISOString(), end: endUtc.toISOString() };
 }
 
 // مطابقة بسيطة بالاحتواء (لا ترتيب/تقييم متقدّم - اكتفاءً بالمطلوب فعليًا بالمرحلة 1): نجلب كل زبائن المحل
@@ -1053,8 +1079,10 @@ async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
 
   const customer = match.customer;
   let q = `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false`;
-  if (parsed.from) q += `&created_at=gte.${encodeURIComponent(parsed.from + 'T00:00:00.000Z')}`;
-  if (parsed.to) q += `&created_at=lte.${encodeURIComponent(parsed.to + 'T23:59:59.999Z')}`;
+  // حدود اليوم/الفترة بتوقيت غزة المحلي لا منتصف ليل UTC (راجع gazaDayBoundsUtc) - مهم جدًا هنا تحديدًا
+  // لأن from/to غالبًا تواريخ نسبية محسوبة ("اليوم"، "مبارح") بنفس التوقيت المحلي من classifyIntent
+  if (parsed.from) q += `&created_at=gte.${encodeURIComponent(gazaDayBoundsUtc(parsed.from).start)}`;
+  if (parsed.to) q += `&created_at=lte.${encodeURIComponent(gazaDayBoundsUtc(parsed.to).end)}`;
   if (parsed.note_contains) q += `&notes=ilike.${encodeURIComponent('%' + parsed.note_contains + '%')}`;
   q += '&select=invoice_number,total_amount,payment_status,notes,created_at&order=created_at.desc&limit=20';
 
@@ -1070,12 +1098,11 @@ async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
 
 // ---------- النية 3: مبيعات اليوم ----------
 async function handleIntentTodaySales(shopId, svcHeaders) {
-  const now = new Date();
-  const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
-  const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999)).toISOString();
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
+  const { start, end } = gazaDayBoundsUtc(todayStr);
 
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(startOfDay)}&created_at=lte.${encodeURIComponent(endOfDay)}&select=total_amount,paid_cash,paid_transfer,paid_debt`,
+    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(start)}&created_at=lte.${encodeURIComponent(end)}&select=total_amount,paid_cash,paid_transfer,paid_debt`,
     { headers: svcHeaders }
   );
   const sales = await res.json();

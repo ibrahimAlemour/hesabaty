@@ -43,7 +43,9 @@ const mockAI = {
     if (global.__AI_FAIL_ONCE__) { global.__AI_FAIL_ONCE__ = false; throw new Error('خطأ عابر (محاكاة)'); }
     const userText = messages.find(m => m.role === 'user').content;
     const intentJson = global.__AI_INTENT_MOCK__ ? global.__AI_INTENT_MOCK__(userText) : { intent: 'unknown' };
-    return { response: JSON.stringify(intentJson) };
+    // بعض موديلات Workers AI قد تُرجع response ككائن منظَّم جاهز بدل نص خام (هذا بالضبط ما حصل فعليًا أول
+    // استخدام حي لـllama-3.2-3b-instruct وسبّب "raw.match is not a function") - نحاكي هذا الاحتمال هنا أيضًا
+    return { response: global.__AI_RETURN_OBJECT__ ? intentJson : JSON.stringify(intentJson) };
   }
 };
 
@@ -158,6 +160,14 @@ function fakeRequest(bodyObj, headers = {}) {
   assert('رصيد زبون: المبلغ الصحيح شاملًا الخصم (80.00 ₪)', telegramSent.some(m => m.text.includes('80.00')));
   assert('مؤشر "يكتب..." يُرسَل أثناء المعالجة (تحسين تجربة البطء)', (global.__TYPING_ACTIONS_SENT__ || 0) >= 1);
   assert('رصيد زبون: اسم الزبون الصحيح بالرد', telegramSent.some(m => m.text.includes('أحمد خالد')));
+
+  // ========== 4.5) الموديل يُرجع response ككائن منظَّم بدل نص خام - يجب ألا ينهار الكود (راجع تعليق المحاكاة) ==========
+  telegramSent = [];
+  global.__AI_RETURN_OBJECT__ = true;
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'أحمد خالد العمور', note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد أحمد خالد العمور', from: {} } }), ENV);
+  assert('response ككائن بدل نص: لا ينهار الكود، والرد يصل صحيحًا', telegramSent.some(m => m.text.includes('80.00')));
+  global.__AI_RETURN_OBJECT__ = false;
 
   // ========== 5) رصيد زبون بلا أي دين: رسالة "لا يوجد مستحق" ==========
   telegramSent = [];

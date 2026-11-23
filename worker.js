@@ -962,7 +962,12 @@ async function classifyIntent(text, ai) {
     await new Promise(r => setTimeout(r, 800));
     result = await callAi();
   }
-  const raw = result?.response;
+  // شكل الاستجابة يختلف بين موديلات Workers AI: غالبًا نص خام بـresponse، لكن بعض الموديلات قد تُرجع كائنًا
+  // منظَّمًا جاهزًا هناك مباشرة بدل نص - نتعامل مع كلا الاحتمالين بدل افتراض إنه نص دائمًا (هذا بالضبط ما
+  // سبّب "raw.match is not a function" أول استخدام حي لموديل llama-3.2-3b-instruct)
+  let raw = result?.response;
+  // لو أرجع الموديل كائنًا منظَّمًا جاهزًا بدل نص خام، نحوّله لنص JSON فنعيد تفكيكه بنفس المسار أدناه بسلام
+  if (raw != null && typeof raw !== 'string') raw = JSON.stringify(raw);
   if (!raw) throw new Error('رد Workers AI فارغ أو بصيغة غير متوقعة');
 
   // النموذج قد يحيط الـJSON بعلامات ```json أحيانًا رغم التعليمات الصريحة بعدم فعل ذلك - نستخرج أول كائن {...}

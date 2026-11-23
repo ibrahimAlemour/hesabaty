@@ -889,6 +889,28 @@ async function handleBotStart(chatId, code, fromUser, svcHeaders, botToken, env)
 
 // ---------- معالجة رسالة عادية من حساب مرتبط: Workers AI لتصنيف النية فقط، ثم استعلام جاهز مسبقًا ----------
 async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env) {
+  const shopId = botUser.shop_id; // shop_id دائمًا من bot_users - لا من parsed إطلاقًا (الذكاء الاصطناعي لا يُرجع shop_id أصلًا)
+
+  // استئناف اختيار رقمي من قائمة غموض سابقة (صالحة دقيقتين فقط) - بدون أي استدعاء للذكاء الاصطناعي إطلاقًا:
+  // أسرع وأرخص وأدق، ويتجنّب تمامًا خطأ ملاحَظًا فعليًا (رد المستخدم برقم مجرَّد بلا سياق كان يُرسَل للنموذج
+  // كرسالة مستقلة فيحاول "يفهمه" وأحيانًا يُخرِج نص تعليمات البرومبت نفسه كاسم زبون!)
+  const numMatch = text.trim().match(/^(\d{1,2})$/);
+  if (numMatch && botUser.pending_matches && botUser.pending_expires_at && new Date(botUser.pending_expires_at) > new Date()) {
+    const idx = parseInt(numMatch[1], 10) - 1;
+    const matches = botUser.pending_matches;
+    const pendingIntent = botUser.pending_intent;
+    const pendingParams = botUser.pending_params;
+    await clearPendingState(chatId, svcHeaders);
+    if (idx < 0 || idx >= matches.length) {
+      await sendTelegramMessage(chatId, `رقم غير صحيح. اختر رقمًا من 1 إلى ${matches.length}، أو ابعت اسم الزبون من جديد.`, botToken, env);
+      return;
+    }
+    sendChatAction(chatId, botToken, env);
+    const reply = await resolveIntentForCustomer(shopId, pendingIntent, pendingParams, matches[idx], svcHeaders);
+    await sendTelegramMessage(chatId, typeof reply === 'string' ? reply : 'حدث خطأ غير متوقَّع.', botToken, env);
+    return;
+  }
+
   if (!env.AI) {
     await sendTelegramMessage(chatId, 'البوت غير مهيأ بعد (ربط Workers AI ناقص - راجع [ai] بـwrangler.toml).', botToken, env);
     return;
@@ -909,7 +931,10 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
     return;
   }
 
-  const shopId = botUser.shop_id; // shop_id دائمًا من bot_users - لا من parsed إطلاقًا (Gemini لا يُرجع shop_id أصلًا)
+  // حاجز أمان/جودة: لو "استخرج" النموذج (نادر لكن حصل فعليًا) نص تعليمات البرومبت نفسه بدل اسم حقيقي، أو كلمة
+  // تاريخ نسبي علقت بآخر الاسم ("خال مبارح" بدل "خال" + تاريخ أمس) - ننظّف قبل أي استخدام للقيمة كفلتر بحث
+  parsed.customer = sanitizeExtractedCustomer(parsed.customer);
+
   let reply;
   switch (parsed.intent) {
     case 'customer_balance':
@@ -927,7 +952,51 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
     default:
       reply = 'ما قدرت أفهم طلبك. جرّب مثلاً: "رصيد أبو خالد" أو "مبيعات اليوم" أو "أكثر الزبائن ديون".';
   }
+
+  // غموض بالاسم: نحفظ القائمة المعروضة والنية الأصلية لدقيقتين، حتى يقدر المستخدم يرد برقم بسيط بدل الاسم كامل
+  if (reply && typeof reply === 'object' && reply.__ambiguous) {
+    await savePendingState(chatId, parsed.intent, parsed, reply.matches, svcHeaders);
+    await sendTelegramMessage(chatId, formatAmbiguousReply(reply.matches), botToken, env);
+    return;
+  }
   await sendTelegramMessage(chatId, reply, botToken, env);
+}
+
+// تُستخدم فقط بالمسارين اللذين يحتاجان اسم زبون (رصيد/فواتير) - today_sales وtop_debtors لا يصلان هنا إطلاقًا
+async function resolveIntentForCustomer(shopId, intent, params, customer, svcHeaders) {
+  if (intent === 'customer_balance') return replyCustomerBalance(customer, shopId, svcHeaders);
+  if (intent === 'customer_invoices') return replyCustomerInvoices(customer, params || {}, shopId, svcHeaders);
+  return 'حدث خطأ غير متوقَّع، جرّب من جديد.';
+}
+
+async function savePendingState(chatId, intent, params, matches, svcHeaders) {
+  const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString(); // صالحة دقيقتين فقط
+  await fetch(`${SUPABASE_URL}/rest/v1/bot_users?chat_id=eq.${chatId}`, {
+    method: 'PATCH', headers: svcHeaders,
+    body: JSON.stringify({
+      pending_intent: intent,
+      pending_params: params,
+      pending_matches: matches.slice(0, 8).map(m => ({ id: m.id, name: m.name, phone: m.phone })),
+      pending_expires_at: expiresAt
+    })
+  });
+}
+
+async function clearPendingState(chatId, svcHeaders) {
+  await fetch(`${SUPABASE_URL}/rest/v1/bot_users?chat_id=eq.${chatId}`, {
+    method: 'PATCH', headers: svcHeaders,
+    body: JSON.stringify({ pending_intent: null, pending_params: null, pending_matches: null, pending_expires_at: null })
+  });
+}
+
+const RELATIVE_DATE_WORDS = new Set(['مبارح', 'امبارح', 'إمبارح', 'اليوم', 'أمس']);
+function sanitizeExtractedCustomer(customer) {
+  if (!customer) return null;
+  // لو النموذج أعاد نص تعليمات البرومبت نفسه بالخطأ بدل اسم حقيقي - نتجاهله تمامًا
+  if (/اسم الزبون|أو null|customer_balance|customer_invoices|today_sales|top_debtors/i.test(customer)) return null;
+  // كلمات تاريخ نسبي علقت بالاسم المستخرَج ("خال مبارح") - نشيلها، التاريخ نفسه مستخرَج أصلًا بحقلي from/to
+  const cleaned = customer.split(/\s+/).filter(w => !RELATIVE_DATE_WORDS.has(w)).join(' ').trim();
+  return cleaned || null;
 }
 
 // Gemini يُرجع JSON فقط (intent + فلاتر نصية) - ممنوع منعًا باتًا أن يُستخدم ناتجه كـSQL أو كجزء من استعلام خام؛
@@ -1044,17 +1113,21 @@ export async function findCustomerByName(shopId, query, svcHeaders) {
 
 function formatAmbiguousReply(matches) {
   const list = matches.slice(0, 8).map((c, i) => `${i + 1}. ${c.name}${c.phone ? ` (${c.phone})` : ''}`).join('\n');
-  return `في أكثر من زبون بهالاسم:\n${list}\n\nابعت الاسم كامل أو أدق حتى أقدر أحدد المقصود.`;
+  return `في أكثر من زبون بهالاسم:\n${list}\n\nابعت رقم الزبون المطلوب (مثلاً 1)، أو اسمه كامل/أدق لو حابب.`;
 }
 
 // ---------- النية 1: رصيد زبون ----------
+// تُرجع نص الرد مباشرة، أو marker خاص {__ambiguous:true, matches} ليتولّى handleBotMessage حفظ حالة
+// "بانتظار اختيار رقمي" قبل الرد (راجع savePendingState) - بدل تنسيق رد الغموض هنا مباشرة كما كان سابقًا
 async function handleIntentCustomerBalance(shopId, customerQuery, svcHeaders) {
   if (!customerQuery) return 'بدي اسم الزبون حتى أقدر أجيب رصيده. مثال: "رصيد أبو خالد".';
   const match = await findCustomerByName(shopId, customerQuery, svcHeaders);
   if (match.status === 'none') return `ما لقيت زبون اسمه قريب من "${customerQuery}".`;
-  if (match.status === 'ambiguous') return formatAmbiguousReply(match.matches);
+  if (match.status === 'ambiguous') return { __ambiguous: true, matches: match.matches };
+  return replyCustomerBalance(match.customer, shopId, svcHeaders);
+}
 
-  const customer = match.customer;
+async function replyCustomerBalance(customer, shopId, svcHeaders) {
   const [salesRes, paymentsRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=paid_debt`, { headers: svcHeaders }),
     fetch(`${SUPABASE_URL}/rest/v1/payments?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=amount,discount`, { headers: svcHeaders })
@@ -1075,9 +1148,11 @@ async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
   if (!parsed.customer) return 'بدي اسم الزبون حتى أقدر أجيب فواتيره. مثال: "فواتير سامر".';
   const match = await findCustomerByName(shopId, parsed.customer, svcHeaders);
   if (match.status === 'none') return `ما لقيت زبون اسمه قريب من "${parsed.customer}".`;
-  if (match.status === 'ambiguous') return formatAmbiguousReply(match.matches);
+  if (match.status === 'ambiguous') return { __ambiguous: true, matches: match.matches };
+  return replyCustomerInvoices(match.customer, parsed, shopId, svcHeaders);
+}
 
-  const customer = match.customer;
+async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
   let q = `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false`;
   // حدود اليوم/الفترة بتوقيت غزة المحلي لا منتصف ليل UTC (راجع gazaDayBoundsUtc) - مهم جدًا هنا تحديدًا
   // لأن from/to غالبًا تواريخ نسبية محسوبة ("اليوم"، "مبارح") بنفس التوقيت المحلي من classifyIntent

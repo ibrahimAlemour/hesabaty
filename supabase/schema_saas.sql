@@ -808,6 +808,15 @@ alter table bot_link_codes enable row level security;
 create policy bot_link_codes_insert_owner on bot_link_codes for insert
   with check (shop_id = my_shop_id() and is_owner());
 
+-- ---------- 28) بوت تيليجرام: حالة "بانتظار اختيار رقمي" عند غموض اسم الزبون ----------
+-- لما يطابق اسم مذكور بالرسالة أكثر من زبون، نعرض قائمة مرقَّمة ونحفظ هذه الحالة هنا لدقيقتين فقط، حتى
+-- يقدر المستخدم يرد برقم بسيط ("1") بدل إعادة كتابة الاسم كامل - بدون هذا كان الرد برقم يذهب للذكاء
+-- الاصطناعي مباشرة فيُعامله كرسالة مستقلة بلا سياق (راجع handleBotMessage بـworker.js)
+alter table bot_users add column if not exists pending_intent text;
+alter table bot_users add column if not exists pending_params jsonb;
+alter table bot_users add column if not exists pending_matches jsonb;
+alter table bot_users add column if not exists pending_expires_at timestamptz;
+
 -- ============================================================
 -- انتهت الترقية. الخطوة التالية: افتح admin/index.html وسجّل دخول بنفس حسابك (أصبح Super Admin تلقائيًا).
 -- ============================================================

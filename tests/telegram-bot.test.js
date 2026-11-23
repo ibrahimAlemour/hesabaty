@@ -106,6 +106,12 @@ function mockFetch(url, opts = {}) {
     }
     return Promise.resolve({ ok: true, json: async () => rows });
   }
+  if (method === 'PATCH') {
+    const patch = JSON.parse(opts.body);
+    const rows = applyFilters(DB[table] || []);
+    for (const row of rows) Object.assign(row, patch);
+    return Promise.resolve({ ok: true, json: async () => rows });
+  }
   if (method === 'DELETE') {
     const before = (DB[table] || []).length;
     DB[table] = applyFilters(DB[table] || []).length
@@ -286,4 +292,45 @@ function fakeRequest(bodyObj, headers = {}) {
   assert('بدون secret_token الصحيح بالترويسة: الطلب يُرفض (401) ولا يُنفَّذ شيء', res1.status === 401 && telegramSent.length === 0);
   const res2 = await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد أحمد خالد', from: {} } }, { 'X-Telegram-Bot-Api-Secret-Token': 'real-secret' }), envWithSecret);
   assert('بـsecret_token الصحيح: الطلب يُعالَج بشكل طبيعي', res2.status === 200);
+
+  // ========== 16) اختيار زبون غامض برقم بسيط ("1") بدل إعادة كتابة الاسم - يتجاوز الذكاء الاصطناعي كليًا ==========
+  // (هذا تحديدًا ما كان يُفشِل فعليًا بالإنتاج: رد "1" بلا سياق كان يُرسَل للذكاء الاصطناعي فيُهلوِس)
+  telegramSent = [];
+  global.__AI_CALL_COUNT__ = 0;
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'خالد', note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد خالد', from: {} } }), ENV);
+  const ambiguousMsg2 = telegramSent[telegramSent.length - 1];
+  assert('غموض الاسم: الرسالة تدعو لاختيار برقم', !!ambiguousMsg2 && ambiguousMsg2.text.includes('ابعت رقم الزبون'));
+  const aiCallsBeforeNumericPick = global.__AI_CALL_COUNT__;
+  telegramSent = [];
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: '1', from: {} } }), ENV);
+  assert('اختيار رقمي: لا يستدعي الذكاء الاصطناعي إطلاقًا', global.__AI_CALL_COUNT__ === aiCallsBeforeNumericPick);
+  assert('اختيار رقمي: يحل للزبون الأول بالقائمة المعروضة (أحمد خالد، 80.00)', telegramSent.some(m => m.text.includes('أحمد خالد') && m.text.includes('80.00')));
+
+  // ========== 17) اختيار رقمي بعد انتهاء صلاحية حالة الانتظار (دقيقتين): يُعامَل كرسالة عادية بالذكاء الاصطناعي ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'خالد', note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد خالد', from: {} } }), ENV);
+  const botUserRow333 = DB.bot_users.find(b => b.chat_id === 333);
+  botUserRow333.pending_expires_at = PAST; // محاكاة انتهاء الصلاحية (دقيقتان انقضتا فعليًا)
+  telegramSent = [];
+  global.__AI_CALL_COUNT__ = 0;
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'unknown' });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: '1', from: {} } }), ENV);
+  assert('اختيار رقمي بعد انتهاء الصلاحية: يُستدعى الذكاء الاصطناعي (لا يُعامَل كاختيار صالح)', global.__AI_CALL_COUNT__ === 1);
+
+  // ========== 18) تنظيف اسم الزبون المستخرَج من كلمة تاريخ نسبي علقت به ("سامر مبارح" -> "سامر") ==========
+  // يحاكي بالضبط الخلل المُبلَّغ: الذكاء الاصطناعي يلصق كلمة التاريخ النسبي بآخر اسم الزبون المستخرَج، فلا يطابق
+  // أي زبون فعلي بلا هذا التنظيف (اسم فريد هنا تحديدًا حتى لا يتشابك مع "خالد"/"أحمد خالد" الموجودين بالاختبارات)
+  DB.customers.push({ id: 'c4', name: 'سامر', phone: '', shop_id: 'shop1', is_deleted: false });
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'سامر مبارح', note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'ايش اخذ سامر مبارح', from: {} } }), ENV);
+  assert('تنظيف الاسم: تجاهل كلمة التاريخ النسبي الملتصقة يسمح بإيجاد الزبون الحقيقي', telegramSent.some(m => m.text.includes('سامر') && m.text.includes('لا يوجد عليه أي مبلغ')));
+
+  // ========== 19) حاجز أمان: رفض اسم زبون "مستخرَج" فعليًا نص تعليمات البرومبت نفسه (هلوسة نادرة لوحظت فعليًا) ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'اسم الزبون المذكور أو null', note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد فلان', from: {} } }), ENV);
+  assert('حاجز الهلوسة: نص تعليمات البرومبت المسرَّب بحقل customer يُرفَض ولا يُستخدَم كاسم حقيقي', telegramSent.some(m => m.text.includes('بدي اسم الزبون')));
 })().then(() => summary()).catch(e => { console.error(e); process.exitCode = 1; });

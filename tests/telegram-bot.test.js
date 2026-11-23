@@ -334,10 +334,17 @@ function fakeRequest(bodyObj, headers = {}) {
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد فلان', from: {} } }), ENV);
   assert('حاجز الهلوسة: نص تعليمات البرومبت المسرَّب بحقل customer يُرفَض ولا يُستخدَم كاسم حقيقي', telegramSent.some(m => m.text.includes('بدي اسم الزبون')));
 
-  // ========== 20) فواتير بفترة محدَّدة بلا أي نتائج: الرد يوضّح التاريخ المستخدَم فعليًا بالبحث ==========
-  // (يفيد تشخيص هل السبب تاريخ خاطئ مُستخرَج من الذكاء الاصطناعي أو فعلًا لا فواتير بهالفترة)
+  // ========== 20) فواتير بفترة محدَّدة بلا أي نتائج، لكن الزبون له فواتير بتواريخ أخرى: الرد يوضّح التاريخ
+  // المستخدَم فعليًا بالبحث (يفيد تشخيص هل السبب تاريخ خاطئ مُستخرَج من الذكاء الاصطناعي) ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: null, from: '2026-01-01', to: '2026-01-01' });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'إيش أخذ أحمد خالد بتاريخ 1-1-2026', from: {} } }), ENV);
+  assert('لا نتائج بفترة محدَّدة (مع وجود فواتير بتواريخ أخرى): الرد يذكر التاريخ المستخدَم بالبحث', telegramSent.some(m => m.text.includes('2026-01-01')));
+
+  // ========== 21) فواتير بفترة محدَّدة بلا أي نتائج، والزبون المطابَق ليس له ولا فاتورة واحدة إطلاقًا: تحذير
+  // من احتمال زبون مكرَّر بنفس الاسم (customer_id مختلف عن الفاتورة الفعلية) بدل رسالة "خطأ بالتاريخ" المضلِّلة ==========
   telegramSent = [];
   global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'نور بلا دين', note_contains: null, from: '2026-01-01', to: '2026-01-01' });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'إيش أخذت نور بتاريخ 1-1-2026', from: {} } }), ENV);
-  assert('لا نتائج بفترة محدَّدة: الرد يذكر التاريخ المستخدَم بالبحث', telegramSent.some(m => m.text.includes('2026-01-01')));
+  assert('لا فواتير إطلاقًا لهذا الزبون: تحذير من احتمال زبون مكرَّر بنفس الاسم', telegramSent.some(m => m.text.includes('زبون بنفس الاسم')));
 })().then(() => summary()).catch(e => { console.error(e); process.exitCode = 1; });

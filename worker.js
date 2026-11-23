@@ -1169,6 +1169,17 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
     let rangeNote = '';
     if (parsed.from && parsed.to && parsed.from === parsed.to) rangeNote = ` (بتاريخ ${parsed.from})`;
     else if (parsed.from || parsed.to) rangeNote = ` (من ${parsed.from || '—'} إلى ${parsed.to || '—'})`;
+
+    // تشخيص إضافي لو كان في فلتر تاريخ: نتحقق هل لهذا الزبون (بنفس customer_id المطابَق) أي فاتورة إطلاقًا
+    // بغض النظر عن التاريخ. لو الجواب "لا يوجد ولا فاتورة"، الأرجح أنه زبون مكرَّر بنفس الاسم (customer_id
+    // مختلف عن الفاتورة الفعلية الموجودة بالتطبيق) لا خطأ بفلتر التاريخ - نوضّح هذا الاحتمال للمستخدم مباشرة
+    if (parsed.from || parsed.to) {
+      const anyRes = await fetch(`${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=id&limit=1`, { headers: svcHeaders });
+      const anySales = await anyRes.json();
+      if (!Array.isArray(anySales) || !anySales.length) {
+        return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
+      }
+    }
     return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
   }
 

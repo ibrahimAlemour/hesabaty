@@ -1,6 +1,7 @@
 // يثبّت منطق بوت تيليجرام (المرحلة 1) بـworker.js: الربط عبر /start، عزل shop_id، حساب الرصيد (شامل الخصم)،
 // مطابقة الأسماء البسيطة (تطابق/غموض/لا يوجد)، والنيات الأربع (رصيد/فواتير/مبيعات اليوم/أكثر المدينين).
-// لا شبكة حقيقية هنا إطلاقًا: نموذج fetch مزيَّف يحاكي جداول سوبابيس (REST) واستجابة Gemini داخل الذاكرة.
+// لا شبكة حقيقية هنا إطلاقًا: نموذج fetch مزيَّف يحاكي جداول سوبابيس (REST)، ونموذج env.AI مزيَّف يحاكي
+// Workers AI (استبدلنا Gemini الخارجي به بعد نفاد حصته المجانية فعليًا - راجع classifyIntent بـworker.js)
 const { assert, summary } = require('./_harness');
 
 const NOW = new Date();
@@ -34,24 +35,21 @@ function freshDb() {
 let DB;
 let telegramSent = [];
 
+// نموذج Workers AI مزيَّف (env.AI.run) - لا يمرّ عبر fetch إطلاقًا، استدعاء مباشر مثل الـbinding الحقيقي
+const mockAI = {
+  async run(model, { messages }) {
+    global.__AI_CALL_COUNT__ = (global.__AI_CALL_COUNT__ || 0) + 1;
+    if (global.__AI_FAIL_ALWAYS__) throw new Error('Workers AI غير متاح (محاكاة فشل دائم)');
+    if (global.__AI_FAIL_ONCE__) { global.__AI_FAIL_ONCE__ = false; throw new Error('خطأ عابر (محاكاة)'); }
+    const userText = messages.find(m => m.role === 'user').content;
+    const intentJson = global.__AI_INTENT_MOCK__ ? global.__AI_INTENT_MOCK__(userText) : { intent: 'unknown' };
+    return { response: JSON.stringify(intentJson) };
+  }
+};
+
 function mockFetch(url, opts = {}) {
   url = String(url);
   const method = opts.method || 'GET';
-
-  if (url.includes('generativelanguage.googleapis.com')) {
-    global.__GEMINI_CALL_COUNT__ = (global.__GEMINI_CALL_COUNT__ || 0) + 1;
-    if (global.__GEMINI_FAIL_ALWAYS_503__) {
-      return Promise.resolve({ ok: false, status: 503, text: async () => 'high demand' });
-    }
-    if (global.__GEMINI_FAIL_ONCE_503__) {
-      global.__GEMINI_FAIL_ONCE_503__ = false;
-      return Promise.resolve({ ok: false, status: 503, text: async () => 'high demand' });
-    }
-    const body = JSON.parse(opts.body);
-    const userText = body.contents[0].parts[0].text;
-    const intentJson = global.__GEMINI_MOCK__ ? global.__GEMINI_MOCK__(userText) : { intent: 'unknown' };
-    return Promise.resolve({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(intentJson) }] } }] }) });
-  }
 
   if (url.includes('api.telegram.org')) {
     // نتجاهل sendChatAction (مؤشر "يكتب...") عمدًا هنا - لا يحمل .text ولا يهمّنا بهذه الاختبارات، فقط
@@ -115,7 +113,7 @@ function mockFetch(url, opts = {}) {
   return Promise.resolve({ ok: true, json: async () => ([]) });
 }
 
-const ENV = { TELEGRAM_BOT_TOKEN: 'test-token', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key', GEMINI_API_KEY: 'test-gemini-key' };
+const ENV = { TELEGRAM_BOT_TOKEN: 'test-token', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key', AI: mockAI };
 
 function fakeRequest(bodyObj, headers = {}) {
   return { method: 'POST', headers: { get: (k) => headers[k] || null }, json: async () => bodyObj };
@@ -154,7 +152,7 @@ function fakeRequest(bodyObj, headers = {}) {
   // ========== 4) رصيد زبون: تطابق فريد، يشمل الخصم بحساب الرصيد ==========
   DB = freshDb(); telegramSent = [];
   DB.bot_users.push({ chat_id: 333, shop_id: 'shop1', role: 'owner', name: 'صاحب المحل' });
-  global.__GEMINI_MOCK__ = (text) => ({ intent: 'customer_balance', customer: 'أحمد خالد', note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = (text) => ({ intent: 'customer_balance', customer: 'أحمد خالد', note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد أحمد خالد', from: {} } }), ENV);
   // الدين: 10000+5000=15000 - المدفوع: 5000+2000(خصم)=7000 => الرصيد = 8000 فلس = 80 ₪
   assert('رصيد زبون: المبلغ الصحيح شاملًا الخصم (80.00 ₪)', telegramSent.some(m => m.text.includes('80.00')));
@@ -163,13 +161,13 @@ function fakeRequest(bodyObj, headers = {}) {
 
   // ========== 5) رصيد زبون بلا أي دين: رسالة "لا يوجد مستحق" ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'customer_balance', customer: 'نور بلا دين', note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'نور بلا دين', note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد نور', from: {} } }), ENV);
   assert('زبون بلا دين: رسالة واضحة بعدم وجود مستحق', telegramSent.some(m => m.text.includes('لا يوجد عليه أي مبلغ')));
 
   // ========== 6) اسم غامض (يطابق أكثر من زبون): لا يُخمَّن، يُسرَد الاحتمالان ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'customer_balance', customer: 'خالد', note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'خالد', note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد خالد', from: {} } }), ENV);
   const ambiguousMsg = telegramSent.find(m => m.text.includes('أكثر من زبون'));
   assert('اسم غامض: يعرض رسالة توضيح بدل تخمين زبون واحد', !!ambiguousMsg);
@@ -177,27 +175,27 @@ function fakeRequest(bodyObj, headers = {}) {
 
   // ========== 7) اسم غير موجود إطلاقًا ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'customer_balance', customer: 'زبون لا وجود له', note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'زبون لا وجود له', note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد xxx', from: {} } }), ENV);
   assert('اسم غير موجود: رسالة "ما لقيت" واضحة', telegramSent.some(m => m.text.includes('ما لقيت')));
 
   // ========== 8) فواتير زبون مع فلترة بالملاحظات ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: 'للدار', from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: 'للدار', from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'فواتير أحمد خالد اللي فيها للدار', from: {} } }), ENV);
   const invoicesMsg = telegramSent[0];
   assert('فواتير بفلتر ملاحظات: فاتورة واحدة فقط (الوحيدة التي ملاحظتها تحتوي "للدار")', invoicesMsg && invoicesMsg.text.includes('INV-000001') && !invoicesMsg.text.includes('INV-000002'));
 
   // ========== 9) مبيعات اليوم ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'today_sales', customer: null, note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'today_sales', customer: null, note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'مبيعات اليوم', from: {} } }), ENV);
   // كل المبيعات الثلاث بـfreshDb() تاريخها "اليوم" (new Date().toISOString() وقت بناء DB) => الإجمالي 10000+5000+20000=35000=350.00
   assert('مبيعات اليوم: الإجمالي الصحيح وعدد الفواتير', telegramSent.some(m => m.text.includes('3 فاتورة') && m.text.includes('350.00')));
 
   // ========== 10) أكثر الزبائن ديونًا: ترتيب تنازلي صحيح، استبعاد من لا دين عليه ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'top_debtors', customer: null, note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'top_debtors', customer: null, note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'أكثر الزبائن ديون', from: {} } }), ENV);
   const topMsg = telegramSent[0].text;
   const idxC2 = topMsg.indexOf('خالد محمود'); // رصيده 200 (الأعلى)
@@ -210,7 +208,7 @@ function fakeRequest(bodyObj, headers = {}) {
   const originalMock = global.fetch;
   global.fetch = (url, opts) => { capturedUrls.push(String(url)); return originalMock(url, opts); };
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'top_debtors', customer: null, note_contains: null, from: null, to: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'top_debtors', customer: null, note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'أكثر المدينين', from: {} } }), ENV);
   // استثناء وحيد متوقَّع: جلب bot_users نفسه (بـchat_id) - هذا بالضبط ما يُحدِّد shop_id أصلًا، فمن المستحيل
   // منطقيًا فلترته هو بـshop_id قبل أن نعرفه. كل استعلام بعده (بمجرد معرفة shop_id) يجب أن يُفلتَر به فعليًا
@@ -218,29 +216,29 @@ function fakeRequest(bodyObj, headers = {}) {
   assert('عزل المحلات: كل استعلامات سوبابيس (بعد تحديد shop_id من bot_users) مفلترة بـshop_id=eq.shop1', supabaseUrls.length > 0 && supabaseUrls.every(u => u.includes('shop_id=eq.shop1')));
   global.fetch = originalMock;
 
-  // ========== 12) ناتج Gemini غير متوقَّع (نية خارج القائمة البيضاء): يُرفَض ويُعامَل كـunknown بأمان ==========
+  // ========== 12) ناتج الذكاء الاصطناعي غير متوقَّع (نية خارج القائمة البيضاء): يُرفَض ويُعامَل كـunknown بأمان ==========
   telegramSent = [];
-  global.__GEMINI_MOCK__ = () => ({ intent: 'DROP TABLE customers;--', customer: null });
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'DROP TABLE customers;--', customer: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'أي شيء', from: {} } }), ENV);
-  assert('نية غير متوقَّعة من Gemini تُعامَل كـunknown بأمان (رد توضيحي، لا تنفيذ)', telegramSent.some(m => m.text.includes('ما قدرت أفهم')));
+  assert('نية غير متوقَّعة من الذكاء الاصطناعي تُعامَل كـunknown بأمان (رد توضيحي، لا تنفيذ)', telegramSent.some(m => m.text.includes('ما قدرت أفهم')));
 
-  // ========== 13) فشل مؤقت (503 "ازدحام") من Gemini: محاولة واحدة إضافية تلقائية قبل الاستسلام ==========
+  // ========== 13) فشل عابر واحد من Workers AI: محاولة ثانية تلقائية تنجح ==========
   telegramSent = [];
-  global.__GEMINI_CALL_COUNT__ = 0;
-  global.__GEMINI_FAIL_ONCE_503__ = true;
-  global.__GEMINI_MOCK__ = () => ({ intent: 'today_sales', customer: null, note_contains: null, from: null, to: null });
+  global.__AI_CALL_COUNT__ = 0;
+  global.__AI_FAIL_ONCE__ = true;
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'today_sales', customer: null, note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'مبيعات اليوم', from: {} } }), ENV);
-  assert('503 عابر من Gemini: محاولة ثانية تلقائية (استدعاءان لا واحد)', global.__GEMINI_CALL_COUNT__ === 2);
-  assert('503 عابر من Gemini: المحاولة الثانية تنجح ويصل الرد الصحيح للمستخدم', telegramSent.some(m => m.text.includes('مبيعات اليوم')));
+  assert('فشل عابر من Workers AI: محاولة ثانية تلقائية (استدعاءان لا واحد)', global.__AI_CALL_COUNT__ === 2);
+  assert('فشل عابر من Workers AI: المحاولة الثانية تنجح ويصل الرد الصحيح للمستخدم', telegramSent.some(m => m.text.includes('مبيعات اليوم')));
 
-  // ========== 14) ازدحام 503 مستمر (3 محاولات كلها تفشل): رسالة رفض واضحة بدل انتظار بلا نهاية ==========
+  // ========== 14) فشل مستمر من Workers AI (محاولتان كلتاهما تفشلان): رسالة رفض واضحة بدل انتظار بلا نهاية ==========
   telegramSent = [];
-  global.__GEMINI_CALL_COUNT__ = 0;
-  global.__GEMINI_FAIL_ALWAYS_503__ = true;
+  global.__AI_CALL_COUNT__ = 0;
+  global.__AI_FAIL_ALWAYS__ = true;
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'مبيعات اليوم', from: {} } }), ENV);
-  assert('503 مستمر: 3 محاولات بالضبط (محاولة أصلية + محاولتان إضافيتان) قبل الاستسلام', global.__GEMINI_CALL_COUNT__ === 3);
-  assert('503 مستمر: رسالة رفض واضحة للمستخدم بعد استنفاد كل المحاولات', telegramSent.some(m => m.text.includes('تعذّر فهم طلبك')));
-  global.__GEMINI_FAIL_ALWAYS_503__ = false;
+  assert('فشل مستمر: محاولتان بالضبط (أصلية + إعادة واحدة) قبل الاستسلام', global.__AI_CALL_COUNT__ === 2);
+  assert('فشل مستمر: رسالة رفض واضحة للمستخدم بعد استنفاد المحاولات', telegramSent.some(m => m.text.includes('تعذّر فهم طلبك')));
+  global.__AI_FAIL_ALWAYS__ = false;
 
   // ========== 15) التحقق الأمني من secret_token بالـwebhook ==========
   telegramSent = [];

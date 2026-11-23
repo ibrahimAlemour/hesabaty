@@ -17,3 +17,8 @@ crons = ["*/15 * * * *", "0 1 * * *"]
 [[r2_buckets]]
 binding = "BACKUPS"
 bucket_name = "hesabaty-backups"
+
+# Workers AI: تصنيف نية رسائل بوت تيليجرام (راجع classifyIntent بـworker.js) - بديل مجاني بحصة أسخى وأثبت
+# من Gemini API الخارجي، بلا أي مفتاح API منفصل (يُستخدم تلقائيًا عبر حساب Cloudflare نفسه فور النشر)
+[ai]
+binding = "AI"

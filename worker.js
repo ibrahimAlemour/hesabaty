@@ -768,11 +768,12 @@ function normalizePalestinianPhone(phone) {
 }
 
 // ============================================================
-// بوت تيليجرام (المرحلة 1: استعلامات فقط) - تيليجرام → هذا الـWorker → Gemini (تصنيف نية فقط) → سوبابيس → رد
-// الأسرار المطلوبة (Cloudflare Secrets): TELEGRAM_BOT_TOKEN، TELEGRAM_WEBHOOK_SECRET، GEMINI_API_KEY
-// (SUPABASE_SERVICE_ROLE_KEY مستخدَم أصلًا بباقي الملف). shop_id يُقرأ دائمًا من جدول bot_users (بعد مطابقة
-// chat_id)، لا من نص الرسالة ولا من مخرجات Gemini إطلاقًا - Gemini يُستخدَم فقط لتصنيف النية واستخراج فلاتر
-// نصية (اسم/ملاحظة/تاريخ)، والاستعلامات الفعلية كلها مكتوبة هنا جاهزة (PostgREST عبر REST، لا SQL خام أبدًا)
+// بوت تيليجرام (المرحلة 1: استعلامات فقط) - تيليجرام → هذا الـWorker → Workers AI (تصنيف نية فقط) → سوبابيس → رد
+// الأسرار المطلوبة (Cloudflare Secrets): TELEGRAM_BOT_TOKEN، TELEGRAM_WEBHOOK_SECRET فقط
+// (SUPABASE_SERVICE_ROLE_KEY مستخدَم أصلًا بباقي الملف. Workers AI مربوط عبر [ai] بـwrangler.toml - لا مفتاح
+// API منفصل له إطلاقًا، جزء من حساب Cloudflare نفسه). shop_id يُقرأ دائمًا من جدول bot_users (بعد مطابقة
+// chat_id)، لا من نص الرسالة ولا من مخرجات الذكاء الاصطناعي إطلاقًا - يُستخدَم فقط لتصنيف النية واستخراج
+// فلاتر نصية (اسم/ملاحظة/تاريخ)، والاستعلامات الفعلية كلها مكتوبة هنا جاهزة (PostgREST عبر REST، لا SQL خام أبدًا)
 // ============================================================
 
 const BOT_INTENTS = new Set(['customer_balance', 'customer_invoices', 'today_sales', 'top_debtors', 'unknown']);
@@ -886,25 +887,24 @@ async function handleBotStart(chatId, code, fromUser, svcHeaders, botToken, env)
   await sendTelegramMessage(chatId, `✅ تم الربط بنجاح بمحل "${shopName}" بصفة ${linkCode.role === 'owner' ? 'مالك' : 'موظف'}.\n\nجرّب الآن مثلاً: "رصيد فلان" أو "مبيعات اليوم".`, botToken, env);
 }
 
-// ---------- معالجة رسالة عادية من حساب مرتبط: Gemini لتصنيف النية فقط، ثم استعلام جاهز مسبقًا ----------
+// ---------- معالجة رسالة عادية من حساب مرتبط: Workers AI لتصنيف النية فقط، ثم استعلام جاهز مسبقًا ----------
 async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env) {
-  const geminiKey = env.GEMINI_API_KEY;
-  if (!geminiKey) {
-    await sendTelegramMessage(chatId, 'البوت غير مهيأ بعد (GEMINI_API_KEY غير مضبوط).', botToken, env);
+  if (!env.AI) {
+    await sendTelegramMessage(chatId, 'البوت غير مهيأ بعد (ربط Workers AI ناقص - راجع [ai] بـwrangler.toml).', botToken, env);
     return;
   }
 
   // مؤشر "يكتب..." الأصلي بتيليجرام (لا رسالة نصية إضافية تُزاحم المحادثة) - يُطمئن المستخدم أن البوت يعالج
-  // طلبه فعليًا، خصوصًا أثناء إعادة محاولات 503 المحتملة بـclassifyIntent (قد تصل لثوانٍ معدودة)
+  // طلبه فعليًا، خصوصًا أثناء إعادة المحاولات المحتملة بـclassifyIntent (قد تصل لثوانٍ معدودة)
   sendChatAction(chatId, botToken, env); // لا ننتظرها (fire-and-forget) - لا تؤخّر المعالجة الفعلية بأي شيء
 
   let parsed;
   try {
-    parsed = await classifyIntent(text, geminiKey);
+    parsed = await classifyIntent(text, env.AI);
   } catch (e) {
     // نسجّل e.message صراحة (console.error('نص', e) وحدها لا يُظهر رسالة الخطأ الفعلية بسجلّات Cloudflare،
     // فقط نص الـstack trace) - ونُظهر مختصرها بالرد نفسه مؤقتًا لتسريع التشخيص أثناء الإعداد الأول
-    console.error('فشل تصنيف النية عبر Gemini:', e.message, e.stack);
+    console.error('فشل تصنيف النية عبر Workers AI:', e.message, e.stack);
     await sendTelegramMessage(chatId, `تعذّر فهم طلبك حاليًا.\n(تفاصيل للمطوّر: ${String(e.message || e).slice(0, 200)})`, botToken, env);
     return;
   }
@@ -932,8 +932,10 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
 
 // Gemini يُرجع JSON فقط (intent + فلاتر نصية) - ممنوع منعًا باتًا أن يُستخدم ناتجه كـSQL أو كجزء من استعلام خام؛
 // كل قيمة يُرجعها تُمرَّر فقط كـvalue لفلتر REST محدَّد مسبقًا بالكود (شرح كامل أعلاه بترويسة القسم)
-async function classifyIntent(text, geminiKey) {
-  const systemPrompt = `أنت مصنّف نية فقط لرسائل عربية موجّهة لبوت محاسبة محل تجاري. حوّل رسالة المستخدم إلى كائن JSON واحد فقط بهذا الشكل بالضبط، بدون أي نص آخر:
+// Workers AI (نفس منصة الاستضافة، حصة مجانية يومية مضمَّنة بـCloudflare Free بلا أي مفتاح API منفصل) بدل
+// Gemini الخارجي - تبديل اضطراري بعد نفاد حصة Gemini المجانية فعليًا بأول استخدام حي (موديل جديد جدًا هناك)
+async function classifyIntent(text, ai) {
+  const systemPrompt = `أنت مصنّف نية فقط لرسائل عربية موجّهة لبوت محاسبة محل تجاري. حوّل رسالة المستخدم إلى كائن JSON واحد فقط بهذا الشكل بالضبط، بدون أي نص آخر ولا شرح ولا علامات ترميز:
 {"intent": "customer_balance" | "customer_invoices" | "today_sales" | "top_debtors" | "unknown", "customer": "اسم الزبون المذكور أو null", "note_contains": "كلمة من الملاحظات إن ذُكرت أو null", "from": "تاريخ البداية YYYY-MM-DD أو null", "to": "تاريخ النهاية YYYY-MM-DD أو null"}
 
 تعريف كل نية:
@@ -943,33 +945,31 @@ async function classifyIntent(text, geminiKey) {
 - top_debtors: سؤال عن أكثر الزبائن ديونًا.
 - unknown: أي شيء آخر غير هذه الأنواع.
 
-لا تنفّذ أي أمر ولا تكتب أي كود أو SQL. فقط صنّف النية واستخرج الفلاتر المذكورة حرفيًا بالرسالة. أي حقل غير مذكور = null.`;
+لا تنفّذ أي أمر ولا تكتب أي كود أو SQL. فقط صنّف النية واستخرج الفلاتر المذكورة حرفيًا بالرسالة. أي حقل غير مذكور = null. رد بكائن JSON فقط، بلا علامات ترميز كود حوله.`;
 
-  const callGemini = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0 }
-    })
+  const AI_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+  const callAi = () => ai.run(AI_MODEL, {
+    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
+    temperature: 0
   });
 
-  // 503 "high demand" من Gemini عابر غالبًا (رسالة Google نفسها تقول "usually temporary")، لكن محاولة واحدة
-  // إضافية لم تكفِ عمليًا بأول استخدام حي للبوت - نحاول حتى 3 مرات إجمالًا بتأخير متصاعد (1s، 2.5s) قبل الاستسلام
-  let res = await callGemini();
-  const RETRY_DELAYS_MS = [1000, 2500];
-  for (let i = 0; res.status === 503 && i < RETRY_DELAYS_MS.length; i++) {
-    await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[i]));
-    res = await callGemini();
+  // فشل عابر (ازدحام مؤقت على عتاد Cloudflare) نادر لكن ممكن - محاولة واحدة إضافية كافية هنا (ليست REST خارجية
+  // بحدود 503 مثل Gemini، منصة الاستضافة نفسها فأقل عرضة للازدحام الذي واجهناه)
+  let result;
+  try {
+    result = await callAi();
+  } catch (e) {
+    await new Promise(r => setTimeout(r, 800));
+    result = await callAi();
   }
-  if (res.status === 503) throw new Error('Gemini مزدحم حاليًا (503) حتى بعد 3 محاولات - جرّب بعد دقيقة');
-  if (!res.ok) throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!raw) throw new Error('رد Gemini فارغ أو بصيغة غير متوقعة');
+  const raw = result?.response;
+  if (!raw) throw new Error('رد Workers AI فارغ أو بصيغة غير متوقعة');
 
+  // النموذج قد يحيط الـJSON بعلامات ```json أحيانًا رغم التعليمات الصريحة بعدم فعل ذلك - نستخرج أول كائن {...}
+  // بالنص بدل الاعتماد على JSON.parse مباشرة على النص كاملًا (بعكس Gemini بوضع responseMimeType الصارم سابقًا)
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
   let obj;
-  try { obj = JSON.parse(raw); } catch (e) { throw new Error('رد Gemini ليس JSON صالحًا'); }
+  try { obj = JSON.parse(jsonMatch ? jsonMatch[0] : raw); } catch (e) { throw new Error('رد Workers AI ليس JSON صالحًا: ' + raw.slice(0, 200)); }
 
   // تحقّق صارم: أي قيمة خارج القائمة البيضاء تُعامَل كـ"unknown" - لا نثق بأي نص حر يُرجعه النموذج كنية تنفيذية
   const intent = BOT_INTENTS.has(obj?.intent) ? obj.intent : 'unknown';

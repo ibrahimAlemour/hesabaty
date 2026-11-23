@@ -333,4 +333,11 @@ function fakeRequest(bodyObj, headers = {}) {
   global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_balance', customer: 'اسم الزبون المذكور أو null', note_contains: null, from: null, to: null });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'رصيد فلان', from: {} } }), ENV);
   assert('حاجز الهلوسة: نص تعليمات البرومبت المسرَّب بحقل customer يُرفَض ولا يُستخدَم كاسم حقيقي', telegramSent.some(m => m.text.includes('بدي اسم الزبون')));
+
+  // ========== 20) فواتير بفترة محدَّدة بلا أي نتائج: الرد يوضّح التاريخ المستخدَم فعليًا بالبحث ==========
+  // (يفيد تشخيص هل السبب تاريخ خاطئ مُستخرَج من الذكاء الاصطناعي أو فعلًا لا فواتير بهالفترة)
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'نور بلا دين', note_contains: null, from: '2026-01-01', to: '2026-01-01' });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'إيش أخذت نور بتاريخ 1-1-2026', from: {} } }), ENV);
+  assert('لا نتائج بفترة محدَّدة: الرد يذكر التاريخ المستخدَم بالبحث', telegramSent.some(m => m.text.includes('2026-01-01')));
 })().then(() => summary()).catch(e => { console.error(e); process.exitCode = 1; });

@@ -1163,7 +1163,14 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
 
   const res = await fetch(q, { headers: svcHeaders });
   const sales = await res.json();
-  if (!Array.isArray(sales) || !sales.length) return `ما في فواتير لـ${customer.name} بهالشروط.`;
+  if (!Array.isArray(sales) || !sales.length) {
+    // نوضّح الفترة المستخدَمة فعليًا بالبحث (لو كان بالرسالة تاريخ) - يفيد المستخدم مباشرة لمعرفة إذا
+    // كان البحث بالفترة الصحيحة أصلًا، بدل رد عام قد يُخفي خطأ باستخراج التاريخ عن المستخدم والمطوّر معًا
+    let rangeNote = '';
+    if (parsed.from && parsed.to && parsed.from === parsed.to) rangeNote = ` (بتاريخ ${parsed.from})`;
+    else if (parsed.from || parsed.to) rangeNote = ` (من ${parsed.from || '—'} إلى ${parsed.to || '—'})`;
+    return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
+  }
 
   const STATUS_LABELS = { paid: 'مدفوعة', partial: 'جزئي', debt: 'دين' };
   const lines = sales.map(s => `• ${s.invoice_number} - ${formatMoneyPlainRemote(s.total_amount)} - ${STATUS_LABELS[s.payment_status] || s.payment_status} - ${formatDatePlainRemote(s.created_at)}${s.notes ? ` (${s.notes})` : ''}`);

@@ -947,7 +947,7 @@ async function classifyIntent(text, ai) {
 
 لا تنفّذ أي أمر ولا تكتب أي كود أو SQL. فقط صنّف النية واستخرج الفلاتر المذكورة حرفيًا بالرسالة. أي حقل غير مذكور = null. رد بكائن JSON فقط، بلا علامات ترميز كود حوله.`;
 
-  const AI_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+  const AI_MODEL = '@cf/meta/llama-3.2-3b-instruct';
   const callAi = () => ai.run(AI_MODEL, {
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
     temperature: 0

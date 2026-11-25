@@ -1205,60 +1205,52 @@ async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
 }
 
 async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
+  // فلترة التاريخ تتم بجافاسكربت بعد الجلب (أدناه) لا عبر فلتر created_at=gte/lte بـREST - جُرِّب كل من تكرار
+  // المفتاح وصيغة and=(...) الصريحة الموثَّقة بـPostgREST، وكلاهما رجع صفر نتائج فعليًا بالإنتاج رغم فواتير
+  // مؤكَّدة ضمن الفترة المطلوبة بالضبط ورغم عدم وجود أي خطأ من الخادم (res.ok=true، فقط مصفوفة فارغة) - على
+  // الأرجح خلل بمطابقة created_at بالخادم نفسه لا بمنطقنا. جلب كل فواتير الزبون (بحد أقصى معقول) وفلترتها هنا
+  // يتفادى الاعتماد على ذاك الفلتر كليًا، ويستخدم فقط الفلاتر البسيطة المؤكَّد عملها (shop_id/customer_id/is_deleted)
   let q = `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false`;
-  // حدود اليوم/الفترة بتوقيت غزة المحلي لا منتصف ليل UTC (راجع gazaDayBoundsUtc) - مهم جدًا هنا تحديدًا
-  // لأن from/to غالبًا تواريخ نسبية محسوبة ("اليوم"، "مبارح") بنفس التوقيت المحلي من classifyIntent.
-  // ملاحظة: لا نكرّر "created_at=" كمفتاحين منفصلين بنفس الاسم (gte ثم lte) - رغم أن PostgREST يفترض أن
-  // يدعم هذا، لوحظ فعليًا بالإنتاج أن الفلترة المزدوجة هكذا لا تُرجع أي نتيجة إطلاقًا حتى لفواتير مؤكَّد
-  // وجودها بالفترة المطلوبة. نستخدم بدلًا منه بناء and=(...) الصريح الموثَّق بـPostgREST لتفادي أي التباس
-  if (parsed.from && parsed.to) {
-    q += `&and=(${encodeURIComponent(`created_at.gte.${gazaDayBoundsUtc(parsed.from).start},created_at.lte.${gazaDayBoundsUtc(parsed.to).end}`)})`;
-  } else if (parsed.from) {
-    q += `&created_at=gte.${encodeURIComponent(gazaDayBoundsUtc(parsed.from).start)}`;
-  } else if (parsed.to) {
-    q += `&created_at=lte.${encodeURIComponent(gazaDayBoundsUtc(parsed.to).end)}`;
-  }
   if (parsed.note_contains) q += `&notes=ilike.${encodeURIComponent('%' + parsed.note_contains + '%')}`;
-  q += '&select=invoice_number,total_amount,payment_status,notes,created_at&order=created_at.desc&limit=20';
+  q += '&select=invoice_number,total_amount,payment_status,notes,created_at&order=created_at.desc&limit=300';
 
   const res = await fetch(q, { headers: svcHeaders });
-  const sales = await res.json();
-  // تشخيص مؤقت حاسم: لو الخادم رجّع خطأ (مثلًا فلتر مرفوض) بدل مصفوفة فاتورة، كان الكود القديم يتعامل معه
-  // بصمت كـ"صفر نتائج" (Array.isArray على كائن خطأ = false) فيُخفي السبب الحقيقي تمامًا - نكشفه صراحة الآن
+  const allSales = await res.json();
   if (!res.ok) {
-    return `خطأ من الخادم عند جلب الفواتير (HTTP ${res.status}): ${JSON.stringify(sales).slice(0, 300)}`;
+    return `خطأ من الخادم عند جلب الفواتير (HTTP ${res.status}): ${JSON.stringify(allSales).slice(0, 300)}`;
   }
-  if (!Array.isArray(sales) || !sales.length) {
-    // نوضّح الفترة المستخدَمة فعليًا بالبحث (لو كان بالرسالة تاريخ) - يفيد المستخدم مباشرة لمعرفة إذا
-    // كان البحث بالفترة الصحيحة أصلًا، بدل رد عام قد يُخفي خطأ باستخراج التاريخ عن المستخدم والمطوّر معًا
+  if (!Array.isArray(allSales)) return `ما في فواتير لـ${customer.name} بهالشروط.`;
+
+  let sales = allSales;
+  if (parsed.from || parsed.to) {
+    // نقارن كـميلي-ثانية (Date.getTime) لا كنصوص - created_at المخزَّن فعليًا بصيغة "+00:00" بينما حدودنا
+    // المحسوبة بصيغة "Z"؛ مقارنة نصّية مباشرة بين الصيغتين غير موثوقة رغم تساويهما زمنيًا
+    const gteMs = parsed.from ? new Date(gazaDayBoundsUtc(parsed.from).start).getTime() : null;
+    const lteMs = parsed.to ? new Date(gazaDayBoundsUtc(parsed.to).end).getTime() : null;
+    sales = allSales.filter(s => {
+      const t = new Date(s.created_at).getTime();
+      if (gteMs !== null && t < gteMs) return false;
+      if (lteMs !== null && t > lteMs) return false;
+      return true;
+    });
+  }
+  const totalMatched = sales.length;
+  sales = sales.slice(0, 20);
+
+  if (!sales.length) {
     let rangeNote = '';
     if (parsed.from && parsed.to && parsed.from === parsed.to) rangeNote = ` (بتاريخ ${parsed.from})`;
     else if (parsed.from || parsed.to) rangeNote = ` (من ${parsed.from || '—'} إلى ${parsed.to || '—'})`;
-
-    // تشخيص إضافي لو كان في فلتر تاريخ: نتحقق هل لهذا الزبون (بنفس customer_id المطابَق) أي فاتورة إطلاقًا
-    // بغض النظر عن التاريخ. لو الجواب "لا يوجد ولا فاتورة"، الأرجح أنه زبون مكرَّر بنفس الاسم (customer_id
-    // مختلف عن الفاتورة الفعلية الموجودة بالتطبيق) لا خطأ بفلتر التاريخ - نوضّح هذا الاحتمال للمستخدم مباشرة
-    if (parsed.from || parsed.to) {
-      const anyRes = await fetch(`${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=created_at&order=created_at.desc&limit=3`, { headers: svcHeaders });
-      const anySales = await anyRes.json();
-      if (!Array.isArray(anySales) || !anySales.length) {
-        return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
-      }
-      // تشخيص مؤقت: نعرض التواريخ الخام (created_at) لآخر 3 فواتير فعليًا لهذا الزبون، وحدود البحث المحسوبة
-      // فعليًا (gte/lte) - لمعرفة هل الفواتير تقع فعلًا ضمن الفترة المطلوبة أو في خلل بالاستعلام نفسه
-      const rawDates = anySales.map(s => s.created_at).join(', ');
-      const boundsNote = [
-        parsed.from ? `gte=${gazaDayBoundsUtc(parsed.from).start}` : null,
-        parsed.to ? `lte=${gazaDayBoundsUtc(parsed.to).end}` : null
-      ].filter(Boolean).join(' | ');
-      return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.\n(تشخيص مؤقت - حدود البحث: ${boundsNote}\nآخر تواريخ فواتير فعلية له: ${rawDates})`;
+    // لو ما في ولا فاتورة واحدة لهذا الزبون إطلاقًا (حتى بدون فلترة تاريخ) - الأرجح زبون مكرَّر بنفس الاسم
+    if ((parsed.from || parsed.to) && !allSales.length) {
+      return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
     }
     return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
   }
 
   const STATUS_LABELS = { paid: 'مدفوعة', partial: 'جزئي', debt: 'دين' };
   const lines = sales.map(s => `• ${s.invoice_number} - ${formatMoneyPlainRemote(s.total_amount)} - ${STATUS_LABELS[s.payment_status] || s.payment_status} - ${formatDatePlainRemote(s.created_at)}${s.notes ? ` (${s.notes})` : ''}`);
-  const suffix = sales.length === 20 ? '\n\n(عرضت آخر 20 فاتورة فقط)' : '';
+  const suffix = totalMatched > 20 ? '\n\n(عرضت آخر 20 فاتورة فقط)' : '';
   return `فواتير ${customer.name} (${sales.length}):\n${lines.join('\n')}${suffix}`;
 }
 
@@ -1284,14 +1276,23 @@ async function replyCustomerStatement(customer, shopId, svcHeaders) {
 async function handleIntentTodaySales(shopId, svcHeaders) {
   const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
   const { start, end } = gazaDayBoundsUtc(todayStr);
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
 
-  // راجع التعليق بـreplyCustomerInvoices: and=(...) الصريح بدل تكرار created_at= كمفتاحين منفصلين
+  // فلترة التاريخ بجافاسكربت بعد الجلب لا عبر created_at=gte/lte بـREST - راجع الشرح المفصَّل بـ
+  // replyCustomerInvoices (نفس الخلل بالضبط لوحظ هنا أيضًا). order=desc يضمن إن أحدث 300 فاتورة تغطي
+  // مبيعات اليوم بالكامل مهما كان حجمها (يستحيل عمليًا أن يتجاوز محل واحد 300 فاتورة خلال يوم واحد)
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&and=(${encodeURIComponent(`created_at.gte.${start},created_at.lte.${end}`)})&select=total_amount,paid_cash,paid_transfer,paid_debt`,
+    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&select=total_amount,paid_cash,paid_transfer,paid_debt,created_at&order=created_at.desc&limit=300`,
     { headers: svcHeaders }
   );
-  const sales = await res.json();
-  if (!Array.isArray(sales) || !sales.length) return 'لا توجد مبيعات اليوم حتى الآن.';
+  const allSales = await res.json();
+  if (!res.ok) return `خطأ من الخادم عند جلب مبيعات اليوم (HTTP ${res.status}): ${JSON.stringify(allSales).slice(0, 300)}`;
+  const sales = Array.isArray(allSales) ? allSales.filter(s => {
+    const t = new Date(s.created_at).getTime();
+    return t >= startMs && t <= endMs;
+  }) : [];
+  if (!sales.length) return 'لا توجد مبيعات اليوم حتى الآن.';
 
   const total = sales.reduce((s, x) => s + (x.total_amount || 0), 0);
   const cash = sales.reduce((s, x) => s + (x.paid_cash || 0), 0);

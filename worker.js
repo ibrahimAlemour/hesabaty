@@ -1204,6 +1204,20 @@ async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
   return replyCustomerInvoices(match.customer, parsed, shopId, svcHeaders);
 }
 
+// جلب REST مع إعادة محاولة واحدة فورية لو رجعت المحاولة الأولى مصفوفة فارغة بنجاح (res.ok) - تخفيف لتذبذب
+// مؤقت ملاحَظ فعليًا بمجمّع اتصالات سوبابيس (راجع التعليق بـreplyCustomerInvoices). لا تُستخدم لاستعلامات قد
+// تكون نتيجتها الفارغة متوقَّعة وصحيحة بطبيعتها بلا إعادة محاولة مفيدة (فقط استعلامات فواتير/مبيعات بتاريخ)
+async function fetchWithRetryIfEmpty(url, svcHeaders) {
+  let res = await fetch(url, { headers: svcHeaders });
+  let sales = await res.json();
+  if (res.ok && Array.isArray(sales) && sales.length === 0) {
+    await new Promise(r => setTimeout(r, 300));
+    res = await fetch(url, { headers: svcHeaders });
+    sales = await res.json();
+  }
+  return { res, sales };
+}
+
 async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
   // فلترة التاريخ تتم بجافاسكربت بعد الجلب (أدناه) لا عبر فلتر created_at=gte/lte بـREST - جُرِّب كل من تكرار
   // المفتاح وصيغة and=(...) الصريحة الموثَّقة بـPostgREST، وكلاهما رجع صفر نتائج فعليًا بالإنتاج رغم فواتير
@@ -1214,8 +1228,11 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
   if (parsed.note_contains) q += `&notes=ilike.${encodeURIComponent('%' + parsed.note_contains + '%')}`;
   q += '&select=invoice_number,total_amount,payment_status,notes,created_at&order=created_at.desc&limit=300';
 
-  const res = await fetch(q, { headers: svcHeaders });
-  const allSales = await res.json();
+  // لوحظ فعليًا بالإنتاج أن نفس الاستعلام تمامًا (نفس customer_id، تأكَّدنا بالمقارنة المباشرة) يرجع أحيانًا
+  // صفًا فارغًا بنجاح (res.ok=true) رغم وجود فواتير فعلية، بينما يرجع صحيحًا لحظات لاحقة - الأرجح تذبذب مؤقت
+  // بتجمّع الاتصالات (connection pooler) على الحصة المجانية بسوبابيس تحت ضغط طلبات متتالية. إعادة محاولة واحدة
+  // فورية كافية عمليًا لتفادي عرض "ما في فواتير" خاطئة بسبب هذا التذبذب، بنفس أسلوب إعادة محاولة Workers AI
+  const { res, sales: allSales } = await fetchWithRetryIfEmpty(q, svcHeaders);
   if (!res.ok) {
     return `خطأ من الخادم عند جلب الفواتير (HTTP ${res.status}): ${JSON.stringify(allSales).slice(0, 300)}`;
   }
@@ -1243,9 +1260,7 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
     else if (parsed.from || parsed.to) rangeNote = ` (من ${parsed.from || '—'} إلى ${parsed.to || '—'})`;
     // لو ما في ولا فاتورة واحدة لهذا الزبون إطلاقًا (حتى بدون فلترة تاريخ) - الأرجح زبون مكرَّر بنفس الاسم
     if ((parsed.from || parsed.to) && !allSales.length) {
-      // تشخيص مؤقت: نعرض customer.id المطابَق فعليًا هنا - لمقارنته مباشرة مع المعرّف الذي يطابقه "كشف حساب"
-      // لنفس الاسم بالضبط (لو اختلفا، فالمطابقة نفسها - لا الاستعلام - هي سبب التضارب الملاحَظ فعليًا)
-      return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).\n(تشخيص مؤقت - customer_id: ${customer.id} | الاسم المستخرَج بالبحث: "${parsed.customer || ''}")`;
+      return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
     }
     return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
   }
@@ -1271,8 +1286,7 @@ async function replyCustomerStatement(customer, shopId, svcHeaders) {
     replyCustomerBalance(customer, shopId, svcHeaders),
     replyCustomerInvoices(customer, {}, shopId, svcHeaders)
   ]);
-  // تشخيص مؤقت: customer_id هنا - للمقارنة المباشرة مع المعرّف الذي قد تطابقه نية customer_invoices لنفس الاسم
-  return `كشف حساب ${customer.name}:\n\n${balanceText}\n\n${invoicesText}\n\n(تشخيص مؤقت - customer_id: ${customer.id})`;
+  return `كشف حساب ${customer.name}:\n\n${balanceText}\n\n${invoicesText}`;
 }
 
 // ---------- النية 3: مبيعات اليوم ----------
@@ -1285,11 +1299,10 @@ async function handleIntentTodaySales(shopId, svcHeaders) {
   // فلترة التاريخ بجافاسكربت بعد الجلب لا عبر created_at=gte/lte بـREST - راجع الشرح المفصَّل بـ
   // replyCustomerInvoices (نفس الخلل بالضبط لوحظ هنا أيضًا). order=desc يضمن إن أحدث 300 فاتورة تغطي
   // مبيعات اليوم بالكامل مهما كان حجمها (يستحيل عمليًا أن يتجاوز محل واحد 300 فاتورة خلال يوم واحد)
-  const res = await fetch(
+  const { res, sales: allSales } = await fetchWithRetryIfEmpty(
     `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&select=total_amount,paid_cash,paid_transfer,paid_debt,created_at&order=created_at.desc&limit=300`,
-    { headers: svcHeaders }
+    svcHeaders
   );
-  const allSales = await res.json();
   if (!res.ok) return `خطأ من الخادم عند جلب مبيعات اليوم (HTTP ${res.status}): ${JSON.stringify(allSales).slice(0, 300)}`;
   const sales = Array.isArray(allSales) ? allSales.filter(s => {
     const t = new Date(s.created_at).getTime();

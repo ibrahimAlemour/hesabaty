@@ -1223,6 +1223,11 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
 
   const res = await fetch(q, { headers: svcHeaders });
   const sales = await res.json();
+  // تشخيص مؤقت حاسم: لو الخادم رجّع خطأ (مثلًا فلتر مرفوض) بدل مصفوفة فاتورة، كان الكود القديم يتعامل معه
+  // بصمت كـ"صفر نتائج" (Array.isArray على كائن خطأ = false) فيُخفي السبب الحقيقي تمامًا - نكشفه صراحة الآن
+  if (!res.ok) {
+    return `خطأ من الخادم عند جلب الفواتير (HTTP ${res.status}): ${JSON.stringify(sales).slice(0, 300)}`;
+  }
   if (!Array.isArray(sales) || !sales.length) {
     // نوضّح الفترة المستخدَمة فعليًا بالبحث (لو كان بالرسالة تاريخ) - يفيد المستخدم مباشرة لمعرفة إذا
     // كان البحث بالفترة الصحيحة أصلًا، بدل رد عام قد يُخفي خطأ باستخراج التاريخ عن المستخدم والمطوّر معًا

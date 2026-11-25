@@ -1214,11 +1214,15 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
     // بغض النظر عن التاريخ. لو الجواب "لا يوجد ولا فاتورة"، الأرجح أنه زبون مكرَّر بنفس الاسم (customer_id
     // مختلف عن الفاتورة الفعلية الموجودة بالتطبيق) لا خطأ بفلتر التاريخ - نوضّح هذا الاحتمال للمستخدم مباشرة
     if (parsed.from || parsed.to) {
-      const anyRes = await fetch(`${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=id&limit=1`, { headers: svcHeaders });
+      const anyRes = await fetch(`${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false&select=created_at&order=created_at.desc&limit=3`, { headers: svcHeaders });
       const anySales = await anyRes.json();
       if (!Array.isArray(anySales) || !anySales.length) {
         return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
       }
+      // تشخيص مؤقت: نعرض التواريخ الخام (created_at) لآخر 3 فواتير فعليًا لهذا الزبون - لمعرفة هل فعلًا
+      // تقع ضمن الفترة المطلوبة أو في خلل تنسيق/منطقة زمنية خفي بين التخزين الفعلي وحدود gazaDayBoundsUtc
+      const rawDates = anySales.map(s => s.created_at).join(', ');
+      return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.\n(تشخيص مؤقت - آخر تواريخ فواتير فعلية له: ${rawDates})`;
     }
     return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
   }

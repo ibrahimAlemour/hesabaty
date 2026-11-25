@@ -397,4 +397,16 @@ function fakeRequest(bodyObj, headers = {}) {
   const statementMsg = telegramSent[0]?.text || '';
   assert('كشف حساب: يتضمّن الرصيد', statementMsg.includes('رصيد أحمد خالد'));
   assert('كشف حساب: يتضمّن فواتير بتواريخ غير اليوم أيضًا (لا فلترة تاريخ إطلاقًا مهما حاول النموذج)', statementMsg.includes('INV-DOM22'));
+
+  // ========== 25) تصحيح حتمي لـ"اليوم"/"مبارح" أيضًا - يتجاوز from/to حتى لو النموذج "اخترع" تاريخًا خاطئًا
+  // يمرّ من تحقق الصيغة (YYYY-MM-DD) لكنه ليس اليوم/الأمس الفعليَّين (لوحظ هذا فعليًا بالإنتاج) ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: null, from: '1999-01-01', to: '1999-01-01' });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'ايش اخذ أحمد خالد اليوم', from: {} } }), ENV);
+  assert('تصحيح "اليوم": يتجاوز تاريخًا خاطئًا من النموذج ويجيب فواتير اليوم الصحيحة', telegramSent.some(m => m.text.includes('INV-000001') || m.text.includes('INV-000002')));
+
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: null, from: '1999-01-01', to: '1999-01-01' });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'إيش أخذ أحمد خالد مبارح؟', from: {} } }), ENV);
+  assert('تصحيح "مبارح": يتجاوز تاريخًا خاطئًا من النموذج ويجيب فاتورة الأمس الصحيحة', telegramSent.some(m => m.text.includes('INV-YEST')));
 })().then(() => summary()).catch(e => { console.error(e); process.exitCode = 1; });

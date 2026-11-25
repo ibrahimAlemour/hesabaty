@@ -935,13 +935,15 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
   // تاريخ نسبي علقت بآخر الاسم ("خال مبارح" بدل "خال" + تاريخ أمس) - ننظّف قبل أي استخدام للقيمة كفلتر بحث
   parsed.customer = sanitizeExtractedCustomer(parsed.customer);
 
-  // تصحيح حتمي بكود لا بالذكاء الاصطناعي لتاريخ "يوم من الشهر" (راجع تعليق extractDayOfMonthDate) - يتجاوز
-  // from/to مهما كانت قيمتهما لو النمط موجود صراحة بالرسالة، لأن النموذج لوحظ يتجاهل هذا التركيب أحيانًا
+  // تصحيح حتمي بكود لا بالذكاء الاصطناعي لأي تاريخ صريح بالرسالة (اليوم/مبارح/يوم من الشهر) - يتجاوز from/to
+  // مهما كانت قيمتهما الناتجة عن النموذج. لوحظ فعليًا أن النموذج غير موثوق حتى بنسخ "اليوم"/"مبارح" الجاهزين
+  // المعطَيين له بالبرومبت حرفيًا (كان يرجع تاريخًا خاطئًا يمرّ من تحقق الصيغة لكنه ليس اليوم/الأمس الصحيح فعليًا)
   if (parsed.intent === 'customer_invoices') {
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
+    const yesterdayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date(Date.now() - 24 * 60 * 60 * 1000));
     const [curYear, curMonth] = todayStr.split('-');
-    const explicitDayDate = extractDayOfMonthDate(text, curYear, curMonth);
-    if (explicitDayDate) { parsed.from = explicitDayDate; parsed.to = explicitDayDate; }
+    const explicitDate = extractExplicitDate(text, todayStr, yesterdayStr, curYear, curMonth);
+    if (explicitDate) { parsed.from = explicitDate; parsed.to = explicitDate; }
   }
 
   let reply;
@@ -1027,6 +1029,16 @@ function extractDayOfMonthDate(text, curYear, curMonth) {
     if (dayMatch) return `${curYear}-${curMonth}-${dayMatch[1].padStart(2, '0')}`;
   }
   return null;
+}
+
+// تصحيح حتمي شامل لأي تاريخ صريح بالرسالة - لا يعتمد على الذكاء الاصطناعي إطلاقًا حتى لـ"اليوم"/"مبارح" رغم
+// أنها قيم جاهزة مُعطاة له بالبرومبت حرفيًا: لوحظ فعليًا بالإنتاج أن النموذج (3B) أحيانًا "يخترع" تاريخًا آخر
+// يمرّ من تحقق صيغة YYYY-MM-DD لكنه ليس اليوم/الأمس الفعليَّين، فتفشل الفلترة رغم وجود فواتير بالتاريخ الصحيح
+function extractExplicitDate(text, todayStr, yesterdayStr, curYear, curMonth) {
+  // الأمس أولًا قبل "اليوم" - بعض صياغات "امبارح" لا تتقاطع مع كلمة "اليوم" أصلًا فلا داعي لترتيب حساس هنا
+  if (/مبارح|امبارح|إمبارح|أمس/.test(text)) return yesterdayStr;
+  if (/اليوم/.test(text)) return todayStr;
+  return extractDayOfMonthDate(text, curYear, curMonth);
 }
 
 // Gemini يُرجع JSON فقط (intent + فلاتر نصية) - ممنوع منعًا باتًا أن يُستخدم ناتجه كـSQL أو كجزء من استعلام خام؛
@@ -1227,10 +1239,14 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
       if (!Array.isArray(anySales) || !anySales.length) {
         return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
       }
-      // تشخيص مؤقت: نعرض التواريخ الخام (created_at) لآخر 3 فواتير فعليًا لهذا الزبون - لمعرفة هل فعلًا
-      // تقع ضمن الفترة المطلوبة أو في خلل تنسيق/منطقة زمنية خفي بين التخزين الفعلي وحدود gazaDayBoundsUtc
+      // تشخيص مؤقت: نعرض التواريخ الخام (created_at) لآخر 3 فواتير فعليًا لهذا الزبون، وحدود البحث المحسوبة
+      // فعليًا (gte/lte) - لمعرفة هل الفواتير تقع فعلًا ضمن الفترة المطلوبة أو في خلل بالاستعلام نفسه
       const rawDates = anySales.map(s => s.created_at).join(', ');
-      return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.\n(تشخيص مؤقت - آخر تواريخ فواتير فعلية له: ${rawDates})`;
+      const boundsNote = [
+        parsed.from ? `gte=${gazaDayBoundsUtc(parsed.from).start}` : null,
+        parsed.to ? `lte=${gazaDayBoundsUtc(parsed.to).end}` : null
+      ].filter(Boolean).join(' | ');
+      return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.\n(تشخيص مؤقت - حدود البحث: ${boundsNote}\nآخر تواريخ فواتير فعلية له: ${rawDates})`;
     }
     return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
   }

@@ -776,7 +776,7 @@ function normalizePalestinianPhone(phone) {
 // فلاتر نصية (اسم/ملاحظة/تاريخ)، والاستعلامات الفعلية كلها مكتوبة هنا جاهزة (PostgREST عبر REST، لا SQL خام أبدًا)
 // ============================================================
 
-const BOT_INTENTS = new Set(['customer_balance', 'customer_invoices', 'today_sales', 'top_debtors', 'unknown']);
+const BOT_INTENTS = new Set(['customer_balance', 'customer_invoices', 'customer_statement', 'today_sales', 'top_debtors', 'unknown']);
 
 export async function handleTelegramWebhook(request, env) {
   if (request.method !== 'POST') return json({ ok: true }); // تيليجرام لا يحتاج ردًا مفيدًا لغير POST
@@ -935,6 +935,15 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
   // تاريخ نسبي علقت بآخر الاسم ("خال مبارح" بدل "خال" + تاريخ أمس) - ننظّف قبل أي استخدام للقيمة كفلتر بحث
   parsed.customer = sanitizeExtractedCustomer(parsed.customer);
 
+  // تصحيح حتمي بكود لا بالذكاء الاصطناعي لتاريخ "يوم من الشهر" (راجع تعليق extractDayOfMonthDate) - يتجاوز
+  // from/to مهما كانت قيمتهما لو النمط موجود صراحة بالرسالة، لأن النموذج لوحظ يتجاهل هذا التركيب أحيانًا
+  if (parsed.intent === 'customer_invoices') {
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
+    const [curYear, curMonth] = todayStr.split('-');
+    const explicitDayDate = extractDayOfMonthDate(text, curYear, curMonth);
+    if (explicitDayDate) { parsed.from = explicitDayDate; parsed.to = explicitDayDate; }
+  }
+
   let reply;
   switch (parsed.intent) {
     case 'customer_balance':
@@ -942,6 +951,9 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
       break;
     case 'customer_invoices':
       reply = await handleIntentCustomerInvoices(shopId, parsed, svcHeaders);
+      break;
+    case 'customer_statement':
+      reply = await handleIntentCustomerStatement(shopId, parsed.customer, svcHeaders);
       break;
     case 'today_sales':
       reply = await handleIntentTodaySales(shopId, svcHeaders);
@@ -966,6 +978,7 @@ async function handleBotMessage(chatId, text, botUser, svcHeaders, botToken, env
 async function resolveIntentForCustomer(shopId, intent, params, customer, svcHeaders) {
   if (intent === 'customer_balance') return replyCustomerBalance(customer, shopId, svcHeaders);
   if (intent === 'customer_invoices') return replyCustomerInvoices(customer, params || {}, shopId, svcHeaders);
+  if (intent === 'customer_statement') return replyCustomerStatement(customer, shopId, svcHeaders);
   return 'حدث خطأ غير متوقَّع، جرّب من جديد.';
 }
 
@@ -999,6 +1012,23 @@ function sanitizeExtractedCustomer(customer) {
   return cleaned || null;
 }
 
+// استخراج تاريخ "يوم من الشهر" (مثل "22 الشهر هاد" أو "22 شهر 10") مباشرة من نص الرسالة بكود حتمي، لا عبر
+// الذكاء الاصطناعي - نموذج بحجم 3B لوحظ فعليًا أنه غير موثوق بتركيب تاريخ من رقم يوم + شهر حالي/صريح (كان
+// يتجاهل المثال المعطى بالبرومبت ويرجع تاريخ اليوم الحالي بدل اليوم المطلوب). يُستخدَم كتصحيح لاحق يتجاوز
+// ناتج الذكاء الاصطناعي لحقلي from/to لو انطبق أحد هذين النمطين بالضبط
+function extractDayOfMonthDate(text, curYear, curMonth) {
+  // "22 شهر 10" / "في 22 شهر 10" - رقم يوم + كلمة شهر + رقم شهر صريح
+  let m = text.match(/(\d{1,2})\s*(?:في\s*)?شهر\s*(\d{1,2})\b/);
+  if (m) return `${curYear}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+
+  // "22 الشهر هاد" / "هاد الشهر 22" / "22 هذا الشهر" - رقم يوم + إشارة للشهر الحالي، بلا رقم شهر صريح
+  if (/(هاد|هذا)\s*الشهر|الشهر\s*(هاد|هذا)/.test(text)) {
+    const dayMatch = text.match(/\b(\d{1,2})\b/);
+    if (dayMatch) return `${curYear}-${curMonth}-${dayMatch[1].padStart(2, '0')}`;
+  }
+  return null;
+}
+
 // Gemini يُرجع JSON فقط (intent + فلاتر نصية) - ممنوع منعًا باتًا أن يُستخدم ناتجه كـSQL أو كجزء من استعلام خام؛
 // كل قيمة يُرجعها تُمرَّر فقط كـvalue لفلتر REST محدَّد مسبقًا بالكود (شرح كامل أعلاه بترويسة القسم)
 // Workers AI (نفس منصة الاستضافة، حصة مجانية يومية مضمَّنة بـCloudflare Free بلا أي مفتاح API منفصل) بدل
@@ -1011,14 +1041,17 @@ async function classifyIntent(text, ai) {
   const [curYear, curMonth] = todayStr.split('-');
 
   const systemPrompt = `أنت مصنّف نية فقط لرسائل عربية عامية (لهجة فلسطينية) موجّهة لبوت محاسبة محل تجاري. حوّل رسالة المستخدم إلى كائن JSON واحد فقط بهذا الشكل بالضبط، بدون أي نص آخر ولا شرح ولا علامات ترميز:
-{"intent": "customer_balance" | "customer_invoices" | "today_sales" | "top_debtors" | "unknown", "customer": "اسم الزبون المذكور أو null", "note_contains": "كلمة من الملاحظات إن ذُكرت أو null", "from": "تاريخ البداية YYYY-MM-DD أو null", "to": "تاريخ النهاية YYYY-MM-DD أو null"}
+{"intent": "customer_balance" | "customer_invoices" | "customer_statement" | "today_sales" | "top_debtors" | "unknown", "customer": "اسم الزبون المذكور أو null", "note_contains": "كلمة من الملاحظات إن ذُكرت أو null", "from": "تاريخ البداية YYYY-MM-DD أو null", "to": "تاريخ النهاية YYYY-MM-DD أو null"}
 
 تعريف كل نية:
-- customer_balance: سؤال عن رصيد/دين زبون معيّن (مثل "رصيد أبو خالد" أو "هاتلي رصيد أبو خالد" أو "اعطيني رصيد فلان" أو "كم على فلان").
-- customer_invoices: سؤال عن فواتير/مشتريات/عمليات/كشف حساب/ما اشتراه أو أخذه زبون معيّن، ربما لفترة أو بملاحظة معيّنة (مثل "فواتير سامر" أو "إيش أخذ إبراهيم مبارح" أو "شو اشترى أحمد اليوم" أو "فواتير أحمد اللي فيها للدار" أو "كشف حساب أبو خالد").
+- customer_balance: سؤال عن رصيد/دين زبون معيّن فقط (مثل "رصيد أبو خالد" أو "هاتلي رصيد أبو خالد" أو "اعطيني رصيد فلان" أو "كم على فلان" أو "هل يوجد ديون لفلان").
+- customer_invoices: سؤال عن فواتير/مشتريات/عمليات/ما اشتراه أو أخذه زبون معيّن لفترة أو تاريخ معيّن أو بملاحظة معيّنة (مثل "فواتير سامر" أو "إيش أخذ إبراهيم مبارح" أو "شو اشترى أحمد اليوم" أو "فواتير أحمد اللي فيها للدار").
+- customer_statement: طلب "كشف حساب" كامل لزبون معيّن (يشمل رصيده وكل فواتيره معًا) - أي رسالة فيها كلمة "كشف حساب" أو "كشف الحساب" (مثل "كشف حساب أبو خالد" أو "طيب كشف حساب سامر"). from/to دائمًا null لهذه النية - كشف الحساب دائمًا كامل بدون فلترة تاريخ.
 - today_sales: سؤال عن مبيعات اليوم إجمالًا (بدون ذكر زبون).
 - top_debtors: سؤال عن أكثر الزبائن ديونًا.
 - unknown: أي شيء آخر غير هذه الأنواع.
+
+مهم جدًا: from/to تبقى null إلا لو ذُكرت إشارة زمنية صريحة بالرسالة (اليوم/مبارح/تاريخ/رقم يوم بالشهر). لا تفترض "اليوم" كتاريخ افتراضي أبدًا لمجرد عدم ذكر تاريخ - غياب أي إشارة زمنية يعني from=to=null.
 
 تواريخ نسبية (استخدم هذه القيم الجاهزة بالضبط، لا تحسبها بنفسك):
 - تاريخ اليوم: ${todayStr} (السنة الحالية: ${curYear}, الشهر الحالي: ${curMonth})
@@ -1194,6 +1227,24 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
   const lines = sales.map(s => `• ${s.invoice_number} - ${formatMoneyPlainRemote(s.total_amount)} - ${STATUS_LABELS[s.payment_status] || s.payment_status} - ${formatDatePlainRemote(s.created_at)}${s.notes ? ` (${s.notes})` : ''}`);
   const suffix = sales.length === 20 ? '\n\n(عرضت آخر 20 فاتورة فقط)' : '';
   return `فواتير ${customer.name} (${sales.length}):\n${lines.join('\n')}${suffix}`;
+}
+
+// ---------- كشف حساب: رصيد الزبون + كل فواتيره معًا، دائمًا بدون فلترة تاريخ (راجع تعريف customer_statement
+// بالبرومبت) - هذا بالضبط ما قصده مستخدم فعلي بعبارة "كشف حساب فلان" (وليس رصيد وحده أو فواتير وحدها) ----------
+async function handleIntentCustomerStatement(shopId, customerQuery, svcHeaders) {
+  if (!customerQuery) return 'بدي اسم الزبون حتى أقدر أجيب كشف حسابه. مثال: "كشف حساب أبو خالد".';
+  const match = await findCustomerByName(shopId, customerQuery, svcHeaders);
+  if (match.status === 'none') return `ما لقيت زبون اسمه قريب من "${customerQuery}".`;
+  if (match.status === 'ambiguous') return { __ambiguous: true, matches: match.matches };
+  return replyCustomerStatement(match.customer, shopId, svcHeaders);
+}
+
+async function replyCustomerStatement(customer, shopId, svcHeaders) {
+  const [balanceText, invoicesText] = await Promise.all([
+    replyCustomerBalance(customer, shopId, svcHeaders),
+    replyCustomerInvoices(customer, {}, shopId, svcHeaders)
+  ]);
+  return `كشف حساب ${customer.name}:\n\n${balanceText}\n\n${invoicesText}`;
 }
 
 // ---------- النية 3: مبيعات اليوم ----------

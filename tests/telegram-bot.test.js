@@ -358,4 +358,29 @@ function fakeRequest(bodyObj, headers = {}) {
   assert('الـprompt يحتوي مثال "22 الشهر هاد"', global.__LAST_SYSTEM_PROMPT__.includes('22 الشهر هاد'));
   assert('الـprompt يحتوي مثال "22 شهر 10"', global.__LAST_SYSTEM_PROMPT__.includes('22 شهر 10'));
   assert('الـprompt يحتوي "كشف حساب" كمثال على فواتير الزبون', global.__LAST_SYSTEM_PROMPT__.includes('كشف حساب'));
+
+  // ========== 23) تصحيح حتمي بالكود لتاريخ "يوم من الشهر" يتجاوز from/to حتى لو الذكاء الاصطناعي أخطأ فيهما
+  // (لوحظ فعليًا: النموذج يتجاهل المثال المعطى بالبرومبت ويرجّع تاريخ اليوم الحالي بدل اليوم 22 المطلوب) ==========
+  const todayGazaForDom = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
+  const [domYear, domMonth] = todayGazaForDom.split('-');
+  const day22Bounds = worker.gazaDayBoundsUtc(`${domYear}-${domMonth}-22`);
+  DB.sales.push({
+    id: 's10', shop_id: 'shop1', customer_id: 'c1', paid_debt: 0, total_amount: 3300, paid_cash: 3300, paid_transfer: 0,
+    is_deleted: false, created_at: new Date(new Date(day22Bounds.start).getTime() + 3600000).toISOString(),
+    invoice_number: 'INV-DOM22', payment_status: 'paid', notes: ''
+  });
+  telegramSent = [];
+  // محاكاة خطأ النموذج فعليًا: رجّع from/to = تاريخ اليوم الحالي بدل اليوم 22 المطلوب
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: null, from: todayGazaForDom, to: todayGazaForDom });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'ايش اخذ أحمد خالد في 22 الشهر هاد', from: {} } }), ENV);
+  assert('تصحيح يوم الشهر: يتجاوز from/to الخاطئين من النموذج ويجيب فاتورة يوم 22 الصحيحة', telegramSent.some(m => m.text.includes('INV-DOM22')));
+
+  // ========== 24) "كشف حساب": رصيد + كل الفواتير معًا، ويتجاهل أي تاريخ "يحاول" الذكاء الاصطناعي فرضه
+  // (المشكلة الفعلية بالاستخدام الحي: "كشف حساب" كانت تُصنَّف أحيانًا رصيد وأحيانًا فواتير بتاريخ اليوم فقط) ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_statement', customer: 'أحمد خالد', note_contains: null, from: todayGazaForDom, to: todayGazaForDom });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'كشف حساب أحمد خالد', from: {} } }), ENV);
+  const statementMsg = telegramSent[0]?.text || '';
+  assert('كشف حساب: يتضمّن الرصيد', statementMsg.includes('رصيد أحمد خالد'));
+  assert('كشف حساب: يتضمّن فواتير بتواريخ غير اليوم أيضًا (لا فلترة تاريخ إطلاقًا مهما حاول النموذج)', statementMsg.includes('INV-DOM22'));
 })().then(() => summary()).catch(e => { console.error(e); process.exitCode = 1; });

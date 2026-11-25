@@ -347,4 +347,15 @@ function fakeRequest(bodyObj, headers = {}) {
   global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'نور بلا دين', note_contains: null, from: '2026-01-01', to: '2026-01-01' });
   await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'إيش أخذت نور بتاريخ 1-1-2026', from: {} } }), ENV);
   assert('لا فواتير إطلاقًا لهذا الزبون: تحذير من احتمال زبون مكرَّر بنفس الاسم', telegramSent.some(m => m.text.includes('زبون بنفس الاسم')));
+
+  // ========== 22) الـprompt يحتوي قواعد/أمثلة "يوم من الشهر" (مثل "22 الشهر هاد" أو "22 شهر 10")، وصيغة
+  // "كشف حساب" كمثال على customer_invoices - أُضيفت بعد بلاغ مستخدم فعلي بعدم فهم هذه الصيغ العامية ==========
+  telegramSent = [];
+  global.__AI_INTENT_MOCK__ = () => ({ intent: 'customer_invoices', customer: 'أحمد خالد', note_contains: null, from: null, to: null });
+  await worker.handleTelegramWebhook(fakeRequest({ message: { chat: { id: 333 }, text: 'ايش اخذ أحمد خالد في 22 الشهر هاد', from: {} } }), ENV);
+  const curYearMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date()).slice(0, 7); // 'YYYY-MM'
+  assert('الـprompt يحتوي السنة والشهر الحاليين لبناء تاريخ "يوم من الشهر"', global.__LAST_SYSTEM_PROMPT__.includes(curYearMonth));
+  assert('الـprompt يحتوي مثال "22 الشهر هاد"', global.__LAST_SYSTEM_PROMPT__.includes('22 الشهر هاد'));
+  assert('الـprompt يحتوي مثال "22 شهر 10"', global.__LAST_SYSTEM_PROMPT__.includes('22 شهر 10'));
+  assert('الـprompt يحتوي "كشف حساب" كمثال على فواتير الزبون', global.__LAST_SYSTEM_PROMPT__.includes('كشف حساب'));
 })().then(() => summary()).catch(e => { console.error(e); process.exitCode = 1; });

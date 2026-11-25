@@ -1243,7 +1243,9 @@ async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
     else if (parsed.from || parsed.to) rangeNote = ` (من ${parsed.from || '—'} إلى ${parsed.to || '—'})`;
     // لو ما في ولا فاتورة واحدة لهذا الزبون إطلاقًا (حتى بدون فلترة تاريخ) - الأرجح زبون مكرَّر بنفس الاسم
     if ((parsed.from || parsed.to) && !allSales.length) {
-      return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).`;
+      // تشخيص مؤقت: نعرض customer.id المطابَق فعليًا هنا - لمقارنته مباشرة مع المعرّف الذي يطابقه "كشف حساب"
+      // لنفس الاسم بالضبط (لو اختلفا، فالمطابقة نفسها - لا الاستعلام - هي سبب التضارب الملاحَظ فعليًا)
+      return `ما في ولا فاتورة مسجّلة لـ${customer.name} إطلاقًا بهالحساب. لو متأكد إنه إله فواتير، تأكد من صفحة الزبائن إنه ما في أكثر من زبون بنفس الاسم (قد يكون اسم مكرَّر بسجل مختلف).\n(تشخيص مؤقت - customer_id: ${customer.id} | الاسم المستخرَج بالبحث: "${parsed.customer || ''}")`;
     }
     return `ما في فواتير لـ${customer.name}${rangeNote} بهالشروط.`;
   }
@@ -1269,7 +1271,8 @@ async function replyCustomerStatement(customer, shopId, svcHeaders) {
     replyCustomerBalance(customer, shopId, svcHeaders),
     replyCustomerInvoices(customer, {}, shopId, svcHeaders)
   ]);
-  return `كشف حساب ${customer.name}:\n\n${balanceText}\n\n${invoicesText}`;
+  // تشخيص مؤقت: customer_id هنا - للمقارنة المباشرة مع المعرّف الذي قد تطابقه نية customer_invoices لنفس الاسم
+  return `كشف حساب ${customer.name}:\n\n${balanceText}\n\n${invoicesText}\n\n(تشخيص مؤقت - customer_id: ${customer.id})`;
 }
 
 // ---------- النية 3: مبيعات اليوم ----------

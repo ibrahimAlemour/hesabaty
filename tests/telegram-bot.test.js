@@ -67,23 +67,37 @@ function mockFetch(url, opts = {}) {
   const table = m[1];
   const qs = new URLSearchParams(m[2]);
 
+  // فحص شرط واحد "عمود.عملية.قيمة" (نفس صيغة PostgREST) على صف واحد - مُستخرَج كدالة مستقلة حتى يُعاد
+  // استخدامه لكل من الفلاتر العادية (key=value) وفلتر and=(...) المركَّب (راجع التعليق بـworker.js:
+  // replyCustomerInvoices تحديدًا تتجنّب تكرار نفس المفتاح created_at= مرتين وتستخدم and=(...) بدلًا منه)
+  const checkCondition = (row, key, value) => {
+    const [op, ...rest] = value.split('.');
+    const val = rest.join('.');
+    if (op === 'eq') return String(row[key]) === val;
+    if (op === 'gte') return row[key] >= val;
+    if (op === 'lte') return row[key] <= val;
+    if (op === 'ilike') return String(row[key] || '').includes(val.replace(/^%|%$/g, ''));
+    if (op === 'in') return val.replace(/^\(|\)$/g, '').split(',').includes(String(row[key]));
+    return true;
+  };
+
   const applyFilters = (rows) => rows.filter(row => {
     for (const [key, value] of qs.entries()) {
       if (key === 'select' || key === 'order' || key === 'limit' || key === 'on_conflict') continue;
+      if (key === 'and') {
+        // value هون "(عمود1.عملية1.قيمة1,عمود2.عملية2.قيمة2)" - نفكّها لشروط منفصلة ونطبّقها كلها (AND)
+        const inner = value.replace(/^\(|\)$/g, '');
+        const conds = inner.split(',');
+        for (const cond of conds) {
+          const dotIdx = cond.indexOf('.');
+          const condKey = cond.slice(0, dotIdx);
+          const condValue = cond.slice(dotIdx + 1);
+          if (!checkCondition(row, condKey, condValue)) return false;
+        }
+        continue;
+      }
       // URLSearchParams يفكّ ترميز percent-encoding تلقائيًا عند القراءة - لا حاجة لفكّه مرة ثانية هنا
-      const [op, ...rest] = value.split('.');
-      const val = rest.join('.');
-      if (op === 'eq' && String(row[key]) !== val) return false;
-      if (op === 'gte' && !(row[key] >= val)) return false;
-      if (op === 'lte' && !(row[key] <= val)) return false;
-      if (op === 'ilike') {
-        const pattern = val.replace(/^%|%$/g, '');
-        if (!String(row[key] || '').includes(pattern)) return false;
-      }
-      if (op === 'in') {
-        const ids = val.replace(/^\(|\)$/g, '').split(',');
-        if (!ids.includes(String(row[key]))) return false;
-      }
+      if (!checkCondition(row, key, value)) return false;
     }
     return true;
   });

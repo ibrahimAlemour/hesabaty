@@ -1195,9 +1195,17 @@ async function handleIntentCustomerInvoices(shopId, parsed, svcHeaders) {
 async function replyCustomerInvoices(customer, parsed, shopId, svcHeaders) {
   let q = `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&customer_id=eq.${customer.id}&is_deleted=eq.false`;
   // حدود اليوم/الفترة بتوقيت غزة المحلي لا منتصف ليل UTC (راجع gazaDayBoundsUtc) - مهم جدًا هنا تحديدًا
-  // لأن from/to غالبًا تواريخ نسبية محسوبة ("اليوم"، "مبارح") بنفس التوقيت المحلي من classifyIntent
-  if (parsed.from) q += `&created_at=gte.${encodeURIComponent(gazaDayBoundsUtc(parsed.from).start)}`;
-  if (parsed.to) q += `&created_at=lte.${encodeURIComponent(gazaDayBoundsUtc(parsed.to).end)}`;
+  // لأن from/to غالبًا تواريخ نسبية محسوبة ("اليوم"، "مبارح") بنفس التوقيت المحلي من classifyIntent.
+  // ملاحظة: لا نكرّر "created_at=" كمفتاحين منفصلين بنفس الاسم (gte ثم lte) - رغم أن PostgREST يفترض أن
+  // يدعم هذا، لوحظ فعليًا بالإنتاج أن الفلترة المزدوجة هكذا لا تُرجع أي نتيجة إطلاقًا حتى لفواتير مؤكَّد
+  // وجودها بالفترة المطلوبة. نستخدم بدلًا منه بناء and=(...) الصريح الموثَّق بـPostgREST لتفادي أي التباس
+  if (parsed.from && parsed.to) {
+    q += `&and=(${encodeURIComponent(`created_at.gte.${gazaDayBoundsUtc(parsed.from).start},created_at.lte.${gazaDayBoundsUtc(parsed.to).end}`)})`;
+  } else if (parsed.from) {
+    q += `&created_at=gte.${encodeURIComponent(gazaDayBoundsUtc(parsed.from).start)}`;
+  } else if (parsed.to) {
+    q += `&created_at=lte.${encodeURIComponent(gazaDayBoundsUtc(parsed.to).end)}`;
+  }
   if (parsed.note_contains) q += `&notes=ilike.${encodeURIComponent('%' + parsed.note_contains + '%')}`;
   q += '&select=invoice_number,total_amount,payment_status,notes,created_at&order=created_at.desc&limit=20';
 
@@ -1256,8 +1264,9 @@ async function handleIntentTodaySales(shopId, svcHeaders) {
   const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Gaza' }).format(new Date());
   const { start, end } = gazaDayBoundsUtc(todayStr);
 
+  // راجع التعليق بـreplyCustomerInvoices: and=(...) الصريح بدل تكرار created_at= كمفتاحين منفصلين
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(start)}&created_at=lte.${encodeURIComponent(end)}&select=total_amount,paid_cash,paid_transfer,paid_debt`,
+    `${SUPABASE_URL}/rest/v1/sales?shop_id=eq.${shopId}&is_deleted=eq.false&and=(${encodeURIComponent(`created_at.gte.${start},created_at.lte.${end}`)})&select=total_amount,paid_cash,paid_transfer,paid_debt`,
     { headers: svcHeaders }
   );
   const sales = await res.json();
